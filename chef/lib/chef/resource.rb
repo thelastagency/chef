@@ -55,7 +55,7 @@ class Chef
       @ignore_failure = false
       @not_if = nil
       @only_if = nil
-      @retry = 0
+      @retries = 0
       sline = caller(4).shift
       if sline
         @source_line = sline.gsub!(/^(.+):(.+):.+$/, '\1 line \2')
@@ -188,9 +188,9 @@ class Chef
       true
     end
     
-    def retry(retry_count=nil)
+    def retries(retry_count=nil)
       set_or_return(
-        :retry,
+        :retries,
         retry_count,
         :kind_of => Fixnum
       )
@@ -246,13 +246,13 @@ class Chef
     def run_action(action)
       provider = Chef::Platform.provider_for_node(@node, self)
       provider.load_current_resource
-      retries = 0
+      runs = 0
       begin
         provider.send("action_#{action}")
       rescue Chef::Exceptions::Exec, Timeout::Error
-        if @retry > retries
-          retries += 1
-          Chef::Log.warn("Error running action #{action}, retrying (#{retries} of #{@retry} retries): #{$!.message}")
+        if @retries > runs
+          runs += 1
+          Chef::Log.warn("Error running action #{action}, retrying (#{runs} of #{@retries} retries): #{$!.message}")
           retry
         else
           raise
