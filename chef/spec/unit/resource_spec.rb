@@ -176,7 +176,7 @@ describe Chef::Resource do
                         :updated, :before, :not_if, :supports, 
                         :notifies_delayed, :notifies_immediate, :noop,
                         :ignore_failure, :name, :source_line, :action,
-                        :not_if_args, :only_if_args
+                        :not_if_args, :only_if_args, :retry
                       ]
       (hash.keys - expected_keys).should == []
       (expected_keys - hash.keys).should == []
@@ -236,5 +236,63 @@ describe Chef::Resource do
   it "runs an action by finding its provider, loading the current resource and then running the action" do
     pending
   end
+  
+  describe "retry" do
+    it "should default to 0 retries" do
+      @resource.retry.should == 0
+    end
+    
+    it "should allow to specify the number of retries for an action" do
+      @resource.retry(1)
+      @resource.retry.should == 1
+    end
+  end
+  
+  describe "run_action" do
+    before(:each) do
+      @provider = stub("provider", :action_install => true, :load_current_resource => true)
+      Chef::Platform.stub(:provider_for_node).and_return(@provider)
+      @resource = Chef::Resource.new("rubygems")
+    end
+    
+    it "should call the action on the provider" do
+      @provider.should_receive(:action_install)
+      @resource.run_action("install")
+    end
+    
+    it "should retry running the action when the option is set" do
+      @resource.retry 1
+      @provider.should_receive(:action_install).ordered.and_raise(Chef::Exceptions::Exec)
+      @provider.should_receive(:action_install).ordered.and_return(true)
+      @resource.run_action('install')
+    end
+    
+    it "should reraise the exception when maximum number of retries reached" do
+      @resource.retry 1
+      @provider.should_receive(:action_install).ordered.and_raise(Chef::Exceptions::Exec)
+      @provider.should_receive(:action_install).ordered.and_raise(Chef::Exceptions::Exec)
+      lambda {
+        @resource.run_action('install')
+      }.should raise_error(Chef::Exceptions::Exec)
+    end
+
+    it "should retry on timeout errors" do
+      @resource.retry 1
+      @provider.should_receive(:action_install).ordered.and_raise(Timeout::Error)
+      @provider.should_receive(:action_install).ordered.and_raise(Timeout::Error)
+      lambda {
+        @resource.run_action('install')
+      }.should raise_error(Timeout::Error)
+    end
+    
+    it "should log the error for each run" do
+      @resource.retry 1
+      @provider.should_receive(:action_install).ordered.and_raise(Chef::Exceptions::Exec.new("gem install returned 1, expected 0"))
+      @provider.should_receive(:action_install).ordered.and_return(true)
+      Chef::Log.logger.should_receive(:warn).with("Error running action install, retrying (1 of 1 retries): gem install returned 1, expected 0")
+      @resource.run_action("install")
+    end
+  end
+  
 
 end

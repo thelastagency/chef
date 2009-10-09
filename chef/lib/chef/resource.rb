@@ -57,6 +57,7 @@ class Chef
       @only_if_args = {}
       @notifies_immediate = Array.new
       @notifies_delayed = Array.new
+      @retry = 0
       sline = caller(4).shift
       if sline
         @source_line = sline.gsub!(/^(.+):(.+):.+$/, '\1 line \2')
@@ -195,6 +196,14 @@ class Chef
       true
     end
     
+    def retry(retry_count=nil)
+      set_or_return(
+        :retry,
+        retry_count,
+        :kind_of => Fixnum
+      )
+    end
+    
     def is(*args)
       if args.size == 1
         args.first
@@ -257,7 +266,18 @@ class Chef
     def run_action(action)
       provider = Chef::Platform.provider_for_resource(self)
       provider.load_current_resource
-      provider.send("action_#{action}")
+      retries = 0
+      begin
+        provider.send("action_#{action}")
+      rescue Chef::Exceptions::Exec, Timeout::Error
+        if @retry > retries
+          retries += 1
+          Chef::Log.warn("Error running action #{action}, retrying (#{retries} of #{@retry} retries): #{$!.message}")
+          retry
+        else
+          raise
+        end
+      end
     end
     
     def updated?
