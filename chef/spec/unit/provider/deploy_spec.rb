@@ -40,6 +40,7 @@ describe Chef::Provider::Deploy do
     @provider.should_receive(:enforce_ownership).twice
     @provider.should_receive(:update_cached_repo)
     @provider.should_receive(:copy_cached_repo)
+    @provider.should_receive(:install_gems)
     @provider.should_receive(:callback).with(:before_migrate, nil)
     @provider.should_receive(:migrate)
     @provider.should_receive(:callback).with(:before_symlink, nil)
@@ -70,7 +71,7 @@ describe Chef::Provider::Deploy do
   it "runs the new resource collection in the runner during a callback" do
     @runner.should_receive(:converge)
     callback_code = lambda { :noop }
-    @provider.callback(:whatevs, &callback_code)
+    @provider.callback(:whatevs, callback_code)
   end
   
   it "loads callback files from the release/ dir if the file exists" do
@@ -270,6 +271,70 @@ describe Chef::Provider::Deploy do
       @resource.restart(&restart_cmd)
       @provider.restart
       snitch.should == 42
+    end
+    
+  end
+  
+  describe "API bridge to capistrano" do
+    it "defines sudo as a forwarder to execute" do
+      @provider.should_receive(:execute).with("the moon, fool")
+      @provider.sudo("the moon, fool")
+    end
+
+    it "defines run as a forwarder to execute, setting the user to new_resource.user" do
+      mock_execution = mock("Resource::Execute")
+      @provider.should_receive(:execute).with("iGoToHell4this").and_return(mock_execution)
+      @resource.user("notCoolMan")
+      mock_execution.should_receive(:user).with("notCoolMan")
+      @provider.run("iGoToHell4this")
+    end
+
+    it "converts sudo and run to exec resources in hooks" do
+      runner = mock("tehRunner", :null_object => true)
+      Chef::Runner.stub!(:new).and_return(runner)
+      
+      snitch = nil
+      @resource.user("tehCat")
+      
+      callback_code = lambda do
+        snitch = 42
+        temp_collection = self.instance_variable_get(:@collection)
+        run("tehMice")
+        snitch = temp_collection.lookup("execute[tehMice]")
+      end
+      
+      @provider.callback(:phony, callback_code)
+      snitch.should be_an_instance_of(Chef::Resource::Execute)
+      snitch.user.should == "tehCat"
+    end
+  end
+  
+  describe "installing gems from a gems.yml" do
+    
+    before do
+      ::File.stub!(:exist?).with("#{@expected_release_dir}/gems.yml").and_return(true)
+      @gem_list = [{:name=>"ezmobius-nanite",:version=>"0.4.1.2"},{:name=>"eventmachine", :version=>"0.12.9"}]
+    end
+    
+    it "reads a gems.yml file, creating gem providers for each with action :upgrade" do
+      IO.should_receive(:read).with("#{@expected_release_dir}/gems.yml").and_return("cookie")
+      YAML.should_receive(:load).with("cookie").and_return(@gem_list)
+      
+      gems = @provider.send(:gem_packages)
+      
+      gems.map { |g| g.action }.should == [[:install], [:install]]
+      gems.map { |g| g.name }.should == %w{ezmobius-nanite eventmachine}
+      gems.map { |g| g.version }.should == %w{0.4.1.2 0.12.9}
+    end
+    
+    it "takes a list of gem providers converges them" do
+      IO.stub!(:read)
+      YAML.stub!(:load).and_return(@gem_list)
+      gem_resources = @provider.send(:gem_packages)
+      run4r = mock("Chef::Runner")
+      Chef::Runner.should_receive(:new).with(@node, an_instance_of(Chef::ResourceCollection)).and_return(run4r)
+      run4r.should_receive(:converge)
+      @provider.send(:install_gems)
     end
     
   end

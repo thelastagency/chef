@@ -49,12 +49,22 @@ class Chef
       def load_current_resource
       end
       
+      def sudo(command,&block)
+        execute(command, &block)
+      end
+      
+      def run(command, &block)
+        exec = execute(command, &block)
+        exec.user(@new_resource.user)
+        exec
+      end
+      
       def action_deploy
         Chef::Log.info "deploying branch: #{@new_resource.branch}"
         enforce_ownership
         update_cached_repo
         copy_cached_repo
-        # chef-deploy then installs gems. hmmm...
+        install_gems
         enforce_ownership
         callback(:before_migrate, @new_resource.before_migrate)
         migrate
@@ -79,10 +89,11 @@ class Chef
       end
       
       def callback(what, callback_code=nil)
+        @collection = Chef::ResourceCollection.new
         case callback_code
         when Proc
           Chef::Log.info "Running callback #{what} code block"
-          self.instance_eval(&callback_code)
+          recipe_eval(&callback_code)
         when String
           callback_file = "#{@release_path}/#{callback_code}"
           unless ::File.exist?(callback_file)
@@ -94,7 +105,6 @@ class Chef
         else
           raise RuntimeError, "You gave me a callback I don't know what to do with: #{callback_code.inspect}"
         end
-        Chef::Runner.new(@node, @collection).converge
       end
       
       def migrate
@@ -124,7 +134,7 @@ class Chef
         if restart_cmd = @new_resource.restart_command
           if restart_cmd.kind_of?(Proc)
             Chef::Log.info("Restarting app with embedded recipe")
-            instance_eval(&restart_cmd)
+            recipe_eval(&restart_cmd)
           else
             Chef::Log.info("Restarting app with #{@new_resource.restart_command} in #{@new_resource.current_path}")
             run_command(run_options(:command => @new_resource.restart_command, :cwd => @new_resource.current_path))
@@ -199,6 +209,25 @@ class Chef
       
       protected
       
+      def install_gems
+        gems_collection = Chef::ResourceCollection.new
+        gem_packages.each { |rbgem| gems_collection << rbgem }
+        Chef::Runner.new(@node, gems_collection).converge
+      end
+      
+      def gem_packages
+        return [] unless ::File.exist?("#{release_path}/gems.yml")
+        gems = YAML.load(IO.read("#{release_path}/gems.yml"))
+        
+        gems.map do |g|
+          r = Chef::Resource::GemPackage.new(g[:name], nil, node)
+          r.version g[:version]
+          r.action :install
+          r.source "http://gems.github.com"
+          r
+        end
+      end
+      
       def run_options(run_opts={})
         run_opts[:user] = @new_resource.user if @new_resource.user
         run_opts[:group] = @new_resource.group if @new_resource.group
@@ -210,7 +239,7 @@ class Chef
         if ::File.exist?(callback_file)
           Dir.chdir(@release_path) do
             Chef::Log.info "running deploy hook: #{callback_file}"
-            from_file(callback_file)
+            recipe_eval { from_file(callback_file) }
           end
         end
       end
