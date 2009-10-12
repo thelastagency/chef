@@ -233,11 +233,46 @@ class Chef
       end
       @not_if
     end
+
+    def build_provider
+      provider_klass = provider
+      provider_klass ||= Chef::Platform.find_provider_for_node(@node, self)
+      Chef::Log.debug("#{self} using #{provider_klass.to_s}")
+      provider = provider_klass.new(@node, self, @collection, @definitions, @cookbook_loader)
+      provider.load_current_resource
+      provider
+    end
     
     def run_action(action)
-      provider = Chef::Platform.provider_for_node(@node, self)
-      provider.load_current_resource
-      provider.send("action_#{action}")
+      build_provider.send("action_#{action}")
+      notify_actions if updated
+    end
+
+    def delayed_actions
+      delayed_actions = Hash.new
+      actions.each_key do |action|
+        if actions[action].has_key?(:delayed)
+          actions[action][:delayed].each do |r|
+            delayed_actions[r] = Hash.new unless delayed_actions.has_key?(r)
+            delayed_actions[r][action] = Array.new unless delayed_actions[r].has_key?(action)
+            delayed_actions[r][action] << lambda {
+              Chef::Log.info("#{self} sending #{action} action to #{r} (delayed)")
+            } 
+          end
+        end
+      end
+      delayed_actions
+    end
+    
+    def notify_actions
+      actions.each_key do |action|
+        if actions[action].has_key?(:immediate)
+          actions[action][:immediate].each do |r|
+            Chef::Log.info("#{self} sending #{action} action to #{r} (immediate)")
+            r.run_action(action)
+          end
+        end
+      end
     end
     
     class << self

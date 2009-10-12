@@ -47,84 +47,61 @@ class Chef
       @cookbook_loader = cookbook_loader
     end
     
-    def build_provider(resource)
-      provider_klass = resource.provider
-      provider_klass ||= Chef::Platform.find_provider_for_node(@node, resource)
-      Chef::Log.debug("#{resource} using #{provider_klass.to_s}")
-      provider = provider_klass.new(@node, resource, @collection, @definitions, @cookbook_loader)
-      provider.load_current_resource
-      provider
-    end
-
-    def run_action(resource, ra)
-      provider = build_provider(resource)
-      provider.send("action_#{ra}")
-
-      if resource.updated
-        resource.actions.each_key do |action|
-          if resource.actions[action].has_key?(:immediate)
-            resource.actions[action][:immediate].each do |r|
-              Chef::Log.info("#{resource} sending #{action} action to #{r} (immediate)")
-              run_action(r, action)
-            end
-          end
-          if resource.actions[action].has_key?(:delayed)
-            resource.actions[action][:delayed].each do |r|
-              @delayed_actions[r] = Hash.new unless @delayed_actions.has_key?(r)
-              @delayed_actions[r][action] = Array.new unless @delayed_actions[r].has_key?(action)
-              @delayed_actions[r][action] << lambda {
-                Chef::Log.info("#{resource} sending #{action} action to #{r} (delayed)")
-              } 
-            end
-          end
-        end
-      end
-    end
-
     def converge
-
       @delayed_actions = Hash.new
       
       @collection.execute_each_resource do |resource|
         begin
           Chef::Log.debug("Processing #{resource}")
           
-          # Check if this resource has an only_if block - if it does, skip it.
-          if resource.only_if
-            unless Chef::Mixin::Command.only_if(resource.only_if)
-              Chef::Log.debug("Skipping #{resource} due to only_if")
-              next
-            end
-          end
+          next if only_if?(resource)
+          next if not_if?(resource)
+          run_actions(resource)
+          @delayed_actions.merge!(resource.delayed_actions)
           
-          # Check if this resource has a not_if block - if it does, skip it.
-          if resource.not_if
-            unless Chef::Mixin::Command.not_if(resource.not_if)
-              Chef::Log.debug("Skipping #{resource} due to not_if")
-              next
-            end
-          end
-          
-          # Walk the actions for this resource, building the provider and running each.
-          action_list = resource.action.kind_of?(Array) ? resource.action : [ resource.action ]
-          action_list.each do |ra|
-            run_action(resource, ra)
-          end
         rescue => e
           Chef::Log.error("#{resource} (#{resource.source_line}) had an error:\n#{e}\n#{e.backtrace}")
           raise e unless resource.ignore_failure
         end
       end
-      
-      # Run all our :delayed actions
-      @delayed_actions.each do |resource, action_hash| 
-        action_hash.each do |action, log_array|
-          log_array.each { |l| l.call } # Call each log message
-          run_action(resource, action)
-        end
-      end
 
+      run_delayed_actions
       true
     end
+    
+    def not_if?(resource)
+      if resource.not_if
+        unless Chef::Mixin::Command.not_if(resource.not_if)
+          Chef::Log.debug("Skipping #{resource} due to not_if")
+          true
+        end
+      end
+    end
+    
+    def only_if?(resource)
+      if resource.only_if
+        unless Chef::Mixin::Command.only_if(resource.only_if)
+          Chef::Log.debug("Skipping #{resource} due to only_if")
+          true
+        end
+      end
+    end
+
+    def run_actions(resource)
+      action_list = resource.action.kind_of?(Array) ? resource.action : [ resource.action ]
+      action_list.each do |action|
+        resource.run_action(action)
+      end
+    end
+    
+    def run_delayed_actions
+      @delayed_actions.each do |resource, actions|
+        actions.each do |action, log_messages|
+          log_messages.each { |log_message| log_message.call }
+          resource.run_action(action)
+        end
+      end
+    end
+    
   end
 end

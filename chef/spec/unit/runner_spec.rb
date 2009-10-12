@@ -80,6 +80,7 @@ describe Chef::Runner do
   end
   
   it "should not check a resources only_if if it is not provided" do
+    Chef::Platform.stub!(:find_provider_for_node).once.and_return(Chef::Provider::SnakeOil)
     @collection[0].should_receive(:only_if).and_return(nil)
     @runner.converge
   end
@@ -97,6 +98,7 @@ describe Chef::Runner do
   end
   
   it "should check a resources not_if, if it is provided" do
+    Chef::Platform.stub!(:find_provider_for_node).once.and_return(Chef::Provider::SnakeOil)
     @collection[0].should_receive(:not_if).and_return(nil)
     @runner.converge
   end
@@ -145,9 +147,9 @@ describe Chef::Runner do
   end
   
   it "should execute delayed actions on changed resources" do
-    Chef::Platform.should_receive(:find_provider_for_node).exactly(3).times.and_return(Chef::Provider::SnakeOil)
+    Chef::Platform.should_receive(:find_provider_for_node).at_least(1).times.and_return(Chef::Provider::SnakeOil)
     provider = Chef::Provider::SnakeOil.new(@node, @collection[0])
-    Chef::Provider::SnakeOil.should_receive(:new).exactly(3).times.and_return(provider)   
+    Chef::Provider::SnakeOil.should_receive(:new).at_least(1).times.and_return(provider)   
     @collection << Chef::Resource::Cat.new("peanut", @collection)
     @collection[1].notifies :buy, @collection[0], :delayed
     @collection[1].updated = true
