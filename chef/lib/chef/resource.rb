@@ -234,17 +234,17 @@ class Chef
       @not_if
     end
 
-    def build_provider
+    def build_provider(collection, definitions, cookbook_loader)
       provider_klass = provider
       provider_klass ||= Chef::Platform.find_provider_for_node(@node, self)
       Chef::Log.debug("#{self} using #{provider_klass.to_s}")
-      provider = provider_klass.new(@node, self, @collection, @definitions, @cookbook_loader)
+      provider = provider_klass.new(@node, self, collection, definitions, cookbook_loader)
       provider.load_current_resource
       provider
     end
     
-    def run_action(action)
-      build_provider.send("action_#{action}")
+    def run_action(action, collection, definitions = nil, cookbook_loader = nil)
+      build_provider(collection, definitions, cookbook_loader).send("action_#{action}")
       notify_actions if updated
     end
 

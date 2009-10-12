@@ -90,7 +90,7 @@ class Chef
     def run_actions(resource)
       action_list = resource.action.kind_of?(Array) ? resource.action : [ resource.action ]
       action_list.each do |action|
-        resource.run_action(action)
+        resource.run_action(action, @collection, @definitions, @cookbook_loader)
       end
     end
     
@@ -98,7 +98,7 @@ class Chef
       @delayed_actions.each do |resource, actions|
         actions.each do |action, log_messages|
           log_messages.each { |log_message| log_message.call }
-          resource.run_action(action)
+          resource.run_action(action, @collection, @definitions, @cookbook_loader)
         end
       end
     end

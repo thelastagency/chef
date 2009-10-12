@@ -75,7 +75,7 @@ describe Chef::Provider do
     rc.insert(dummy)
     
     Chef::Runner.new(node, rc, {}).converge
-    
+
     rc[0].should eql(injector)
     rc[1].name.should eql(:prepared_thumbs)
     rc[2].name.should eql(:twiddled_thumbs)
