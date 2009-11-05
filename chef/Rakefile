@@ -24,9 +24,10 @@ require 'rake/gempackagetask'
 require 'rake/rdoctask'
 require './tasks/rspec.rb'
 
-GEM = "chef"
-AUTHOR = "Adam Jacob"
-EMAIL = "adam@opscode.com"
+GEM = "naked-chef"
+CHEF_VERSION = "0.8.0"
+AUTHOR = "Peritor GmbH"
+EMAIL = "scalarium@peritor.com"
 HOMEPAGE = "http://wiki.opscode.com/display/chef"
 SUMMARY = "A systems integration framework, built to bring the benefits of configuration management to your entire infrastructure."
 
