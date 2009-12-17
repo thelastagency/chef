@@ -28,9 +28,9 @@ $(document).ready(function(){
     form.append($('input#role_name')).css('display', 'none');
     form.append($('textarea#role_description')).css('display', 'none');
     form.append('<input type="hidden" id="default_attributes" name="default_attributes"/>');
-    $('input#default_attributes').attr('value', JSONeditor.treeBuilder.JSONstring.make(JSONeditor.treeBuilder.json.defaults))
+    $('input#default_attributes').attr('value', BCJTEP.save('json["defaults"]'))
     form.append('<input type="hidden" id="override_attributes" name="override_attributes"/>');
-    $('input#override_attributes').attr('value', JSONeditor.treeBuilder.JSONstring.make(JSONeditor.treeBuilder.json.overrides));
+    $('input#override_attributes').attr('value', BCJTEP.save('json["overrides"]'));
     jQuery.each(to_role, function(i, field) {
       form.append('<input type="hidden" name="for_role[]" value="' + field + '"/>');
     });
@@ -44,10 +44,27 @@ $(document).ready(function(){
     }
     form.append($('input#node_name')).css('display', 'none');
     form.append('<input type="hidden" id="attributes" name="attributes"/>');
-    $('input#attributes').attr('value', JSONeditor.treeBuilder.JSONstring.make(JSONeditor.treeBuilder.json))
+    $('input#attributes').attr('value', BCJTEP.save());
     jQuery.each(to_node, function(i, field) {
       form.append('<input type="hidden" name="for_node[]" value="' + field + '"/>');
     });
+  });
+
+  $('form#edit_databag_item, form#create_databag_item').submit(function(event) {
+    var form = $(this);
+    if (form.attr('id') == 'edit_databag_item') {
+      form.append('<input type="hidden" name="_method" value="put">');
+    }
+    form.append('<input type="hidden" id="json_data" name="json_data"/>');
+    form.append($('input#json_data').attr('value', BCJTEP.save()));
+  });
+
+	$('form#edit_databag, form#create_databag').submit(function(event) {
+    var form = $(this);
+    if (form.attr('id') == 'edit_databag') {
+      form.append('<input type="hidden" name="_method" value="put">');
+    }
+    form.append($('input#databag_name')).css('display', 'none');
   });
 
   $('form#edit_client, form#create_client').submit(function(event) {
@@ -58,6 +75,24 @@ $(document).ready(function(){
     form.append($('input#client_name')).css('display', 'none');
     form.append($('input#client_admin')).css('display', 'none');
     form.append($('input#client_private_key')).css('display', 'none');
+    form.append($('input#regen_private_key')).css('display', 'none');
+
+  });
+
+
+  $('form#edit_user, form#login').submit(function(event) {
+    var form = $(this);
+    if (form.attr('id') == 'edit_user') {
+      form.append('<input type="hidden" name="_method" value="put">');
+    	form.append($('input#user_new_password')).css('display', 'none');
+    	form.append($('input#user_admin')).css('display', 'none');
+    	form.append($('input#user_confirm_new_password')).css('display', 'none');
+			form.append($('input#openid')).css('display', 'none');
+		}
+		if (form.attr('id') == 'login') {
+			form.append($('input#user_name')).css('display', 'none');
+			form.append($('input#password')).css('display', 'none');
+  	}
   });
 
   // livequery hidden form for link_to ajax magic
@@ -93,17 +128,6 @@ $(document).ready(function(){
 	// global facebox callback
 	$('a[rel*=facebox]').facebox();
 	
-	/*
-  JSONEditor.prototype.ADD_IMG = '/images/add.png';
-  JSONEditor.prototype.DELETE_IMG = '/images/delete.png';
-  var attrib_editor = new JSONEditor($("#attrib_json_edit"), 400, 300);
-  attrib_editor.doTruncation(true);
-  attrib_editor.showFunctionButtons();
-  
-  var recipe_editor = new JSONEditor($("#recipe_json_edit"), 400, 300);
-  recipe_editor.doTruncation(true);
-  recipe_editor.showFunctionButtons();
-  */
 
   $('.connectedSortable').sortable({
     placeholder: 'ui-state-highlight',
