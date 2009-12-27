@@ -148,12 +148,12 @@ class Chef
       Chef::CouchDB.new.has_key?("openid_registration", name)
     end
     
-    # Remove this node from the CouchDB
+    # Remove this OpenIDRegistration from the CouchDB
     def destroy
       @couchdb.delete("openid_registration", @name, @couchdb_rev)
     end
     
-    # Save this node to the CouchDB
+    # Save this OpenIDRegistration to the CouchDB
     def save
       results = @couchdb.store("openid_registration", @name, self)
       @couchdb_rev = results["rev"]

@@ -6,11 +6,13 @@ if defined?(Merb::Plugins)
   dependency 'merb-slices', :immediate => true
   dependency 'chef', :immediate=>true unless defined?(Chef)
   dependency 'nanite', :immediate=>true 
+  dependency 'uuidtools', :immediate=>true 
 
   require 'chef/role'
   require 'chef/data_bag'
   require 'chef/data_bag_item'
   require 'chef/api_client'
+  require 'chef/webui_user'
   require 'chef/nanite'
   require 'chef/certificate'
 
@@ -60,10 +62,18 @@ if defined?(Merb::Plugins)
       Mixlib::Authentication::Log.logger = Nanite::Log.logger = Ohai::Log.logger = Chef::Log.logger 
 
       Thread.new do
-        until EM.reactor_running?
+        # Okay, we're here because if you run this with the thin adaptor, you
+        # need to wait for EM to heat all the way up - and it won't, until
+        # after activate is finished.
+        sleep 1 
+        Chef::Nanite.in_event { Chef::Log.info("Nanite is ready") }
+
+        # This is because nanite needs to broadcast, and we don't know how long
+        # that will take.
+        20.downto(0) do |sleep_time|
+          Chef::Log.debug("Waiting for Nanite to heat up.. #{sleep_time} seconds left")
           sleep 1
         end
-        Chef::Nanite.in_event { Chef::Log.info("Nanite is ready") }
 
         unless Merb::Config.environment == "test"
           # create the couch design docs for nodes, roles, and databags
@@ -72,7 +82,8 @@ if defined?(Merb::Plugins)
           Chef::Role.create_design_document
           Chef::DataBag.create_design_document
           Chef::ApiClient.create_design_document
-
+          Chef::WebUIUser.create_design_document
+          
           Chef::Log.info('Loading roles')
           Chef::Role.sync_from_disk_to_couchdb
 
@@ -102,6 +113,9 @@ if defined?(Merb::Plugins)
     # @note prefix your named routes with :chefserverslice_
     #   to avoid potential conflicts with global named routes.
     def self.setup_router(scope)
+      # Users
+      scope.resources :users
+      
       # Nodes
       scope.match('/nodes/:id/cookbooks', :method => 'get').to(:controller => "nodes", :action => "cookbooks")
       scope.resources :nodes
@@ -132,14 +146,16 @@ if defined?(Merb::Plugins)
 
       # Data
       scope.match("/data/:data_bag_id/:id", :method => 'get').to(:controller => "data_item", :action => "show").name("data_bag_item")
-      scope.match("/data/:data_bag_id/:id", :method => 'put').to(:controller => "data_item", :action => "create").name("create_data_bag_item")
+      scope.match("/data/:data_bag_id", :method => 'post').to(:controller => "data_item", :action => "create").name("create_data_bag_item")
+      scope.match("/data/:data_bag_id/:id", :method => 'put').to(:controller => "data_item", :action => "update").name("update_data_bag_item")
       scope.match("/data/:data_bag_id/:id", :method => 'delete').to(:controller => "data_item", :action => "destroy").name("destroy_data_bag_item")
       scope.resources :data
 
       scope.match('/').to(:controller => 'main', :action =>'index').name(:top)
     end
-
   end
+  
+
   # Setup the slice layout for ChefServerApi
   #
   # Use ChefServerApi.push_path and ChefServerApi.push_app_path

@@ -137,6 +137,42 @@ describe Chef::Node do
       seen_attributes["canada"].should == "is a nice place"
     end
   end
+  
+  describe "consuming json" do
+    it "should add any json attributes to the node" do
+      @node.consume_attributes "one" => "two", "three" => "four"
+      @node.one.should eql("two")
+      @node.three.should eql("four")
+    end
+
+    it "should allow you to set recipes from the json attributes" do
+      @node.consume_attributes "recipes" => [ "one", "two", "three" ]
+      @node.recipes.should == [ "one", "two", "three" ]
+    end
+
+    it "should allow you to set a run_list from the json attributes" do
+      @node.consume_attributes "run_list" => [ "role[base]", "recipe[chef::server]" ]
+      @node.run_list.should == [ "role[base]", "recipe[chef::server]" ]
+    end
+
+    it "should not add duplicate recipes from the json attributes" do
+      @node.recipes << "one"
+      @node.consume_attributes "recipes" => [ "one", "two", "three" ]
+      @node.recipes.should  == [ "one", "two", "three" ]
+    end
+
+    it "should set the tags attribute to an empty array if it is not already defined" do
+      @node.consume_attributes "{}"
+      @node.tags.should eql([])
+    end
+
+    it "should not set the tags attribute to an empty array if it is already defined" do
+      @node[:tags] = [ "radiohead" ]
+      @node.consume_attributes "{}"
+      @node.tags.should eql([ "radiohead" ])
+    end
+    
+  end
 
   describe "recipes" do
     it "should have a RunList of recipes that should be applied" do
@@ -241,6 +277,27 @@ describe Chef::Node do
     end
   end
 
+  describe "to_hash" do
+    it "should serialize itself as a hash" do
+      @node.default_attrs = { "one" => { "two" => "three", "four" => "five", "eight" => "nine" } }
+      @node.override_attrs = { "one" => { "two" => "three", "four" => "six" } }
+      @node.set["one"]["two"] = "seven"
+      @node.run_list << "role[marxist]"
+      @node.run_list << "role[leninist]"
+      @node.run_list << "recipe[stalinist]"
+      h = @node.to_hash
+      h["one"]["two"].should == "seven"
+      h["one"]["four"].should == "six"
+      h["one"]["eight"].should == "nine"
+      h["recipe"].should be_include("stalinist")
+      h["role"].should be_include("marxist")
+      h["role"].should be_include("leninist")
+      h["run_list"].should be_include("role[marxist]")
+      h["run_list"].should be_include("role[leninist]")
+      h["run_list"].should be_include("recipe[stalinist]")
+    end
+  end
+
   describe "json" do
     it "should serialize itself as json" do
       @node.find_file("test.example.com")
@@ -248,6 +305,8 @@ describe Chef::Node do
       json.should =~ /json_class/
       json.should =~ /name/
       json.should =~ /attributes/
+      json.should =~ /overrides/
+      json.should =~ /defaults/
       json.should =~ /run_list/
     end
     

@@ -161,22 +161,9 @@ class Chef
         @node ||= Chef::Node.new
         @node.name(node_name)
       end
-      if @json_attribs
-        Chef::Log.debug("Adding JSON Attributes")
-        @json_attribs.each do |key, value|
-          if key == "recipes" || key == "run_list"
-            value.each do |recipe|
-              unless @node.recipes.detect { |r| r == recipe }
-                Chef::Log.debug("Adding recipe #{recipe}")
-                @node.recipes << recipe
-              end
-            end
-          else
-            Chef::Log.debug("JSON Attribute: #{key} - #{value.inspect}")
-            @node[key] = value
-          end
-        end
-      end
+      
+      @node.consume_attributes(@json_attribs)
+      
       ohai.each do |field, value|
         Chef::Log.debug("Ohai Attribute: #{field} - #{value.inspect}")
         @node[field] = value
@@ -185,23 +172,22 @@ class Chef
       Chef::Log.debug("Platform is #{platform} version #{version}")
       @node[:platform] = platform
       @node[:platform_version] = version
-      @node[:tags] = Array.new unless @node.attribute?(:tags)
       @node
     end
    
     # 
     # === Returns
-    # true:: Always returns true
+    # rest<Chef::REST>:: returns Chef::REST connection object
     def register
-      if File.exists?(Chef::Config[:validation_key])
+      if File.exists?(Chef::Config[:client_key])
+        Chef::Log.debug("Client key #{Chef::Config[:client_key]} is present - skipping registration")
+      else
+        Chef::Log.info("Client key #{Chef::Config[:client_key]} is not present - registering")
         @vr = Chef::REST.new(Chef::Config[:client_url], Chef::Config[:validation_client_name], Chef::Config[:validation_key])
         @vr.register(@node_name, Chef::Config[:client_key])
-      else
-        Chef::Log.debug("Validation key #{Chef::Config[:validation_key]} is not present - skipping registration")
       end
       # We now have the client key, and should use it from now on.
       @rest = Chef::REST.new(Chef::Config[:chef_server_url])
-      true
     end
     
     # Update the file caches for a given cache segment.  Takes a segment name
@@ -237,14 +223,15 @@ class Chef
             current_checksum = checksum(Chef::FileCache.load(cache_file, false))
           end
 
-          rf_url = generate_cookbook_url(
-            rf['name'], 
-            cookbook_name, 
-            segment, 
-            @node, 
-            current_checksum ? { 'checksum' => current_checksum } : nil
-          )
           if current_checksum != rf['checksum']
+            rf_url = generate_cookbook_url(
+              rf['name'], 
+              cookbook_name, 
+              segment, 
+              @node, 
+              current_checksum ? { 'checksum' => current_checksum } : nil
+            )
+
             changed = true
             begin
               raw_file = @rest.get_rest(rf_url, true)
@@ -264,15 +251,15 @@ class Chef
           end
         end
 
-        Chef::FileCache.list.each do |cache_file|
-          if cache_file =~ /^cookbooks\/(recipes|attributes|definitions|libraries)\//
-            unless file_canonical[cache_file]
-              Chef::Log.info("Removing #{cache_file} from the cache; it is no longer on the server.")
-              Chef::FileCache.delete(cache_file)
-            end
+      end
+
+      Chef::FileCache.list.each do |cache_file|
+        if cache_file =~ /^cookbooks\/#{cookbook_name}\/(recipes|attributes|definitions|libraries|resources|providers)\//
+          unless file_canonical[cache_file]
+            Chef::Log.info("Removing #{cache_file} from the cache; it is no longer on the server.")
+            Chef::FileCache.delete(cache_file)
           end
         end
-
       end
       
     end
@@ -285,6 +272,14 @@ class Chef
       Chef::Log.debug("Synchronizing cookbooks")
       cookbook_hash = @rest.get_rest("nodes/#{@safe_name}/cookbooks")
       Chef::Log.debug("Cookbooks to load: #{cookbook_hash.inspect}")
+      Chef::FileCache.list.each do |cache_file|
+        if cache_file =~ /^cookbooks\/(.+?)\//
+          unless cookbook_hash.has_key?($1)
+            Chef::Log.info("Removing #{cache_file} from the cache; it's cookbook is no longer needed on this client.")
+            Chef::FileCache.delete(cache_file) 
+          end
+        end
+      end
       cookbook_hash.each do |cookbook_name, parts|
         update_file_cache(cookbook_name, parts)
       end

@@ -67,7 +67,8 @@ class ChefServerWebui::Nodes < ChefServerWebui::Application
       @node = Chef::Node.new
       @node.name params[:name]
       @node.attribute = JSON.parse(params[:attributes])
-      @node.run_list params[:for_node]
+      @node.run_list.reset(params[:for_node] ? params[:for_node] : [])
+      raise ArgumentError, "Node name cannot be blank" if (params[:name].nil? || params[:name].length==0)
       begin
         @node.create
       rescue Net::HTTPServerException => e
@@ -79,12 +80,13 @@ class ChefServerWebui::Nodes < ChefServerWebui::Application
       end
       redirect(slice_url(:nodes), :message => { :notice => "Created Node #{@node.name}" })
     rescue StandardError => e
+      Chef::Log.error("StandardError creating node: #{e.message}")
       @node.attribute = JSON.parse(params[:attributes])
       @available_recipes = get_available_recipes 
       @available_roles = Chef::Role.list.keys.sort
       @node.run_list params[:for_node]
       @run_list = @node.run_list
-      @_message = { :error => $! }      
+      @_message = { :error => "Exception raised creating node, #{e.message.length <= 150 ? e.message : "please check logs for details"}" }
       render :new
     end
   end
@@ -102,11 +104,13 @@ class ChefServerWebui::Nodes < ChefServerWebui::Application
       @node.save
       @_message = { :notice => "Updated Node" }
       render :show
-    rescue
+    rescue Exception => e
+      Chef::Log.error("Exception updating node: #{e.message}")
       @available_recipes = get_available_recipes 
       @available_roles = Chef::Role.list.keys.sort
       @run_list = Chef::RunList.new
       @run_list.reset(params[:for_node])
+      @_message = { :error => "Exception raised updating node, #{e.message.length <= 150 ? e.message : "please check logs for details"}" }
       render :edit
     end
   end

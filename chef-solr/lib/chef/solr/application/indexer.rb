@@ -24,6 +24,7 @@ require 'chef/solr/index'
 require 'chef/solr/index_actor'
 require 'chef/daemon'
 require 'chef/nanite'
+require 'chef/webui_user'
 require 'nanite'
 require 'eventmachine'
 
@@ -120,7 +121,7 @@ class Chef
             :identity => identity, 
             :format => :json
           }
-          Chef::Log.level(Chef::Config[:log_level])
+          Chef::Log.level = Chef::Config[:log_level]
         end
 
         def run_application
