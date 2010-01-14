@@ -12,7 +12,6 @@ HOMEPAGE = "http://wiki.opscode.com/display/chef"
 SUMMARY = "A systems integration framework, built to bring the benefits of configuration management to your entire infrastructure."
 
 spec = Gem::Specification.new do |s|
-  s.rubyforge_project = 'merb'
   s.name = GEM_NAME
   s.version = CHEF_SERVER_VERSION
   s.platform = Gem::Platform::RUBY
@@ -47,12 +46,12 @@ end
 
 desc "Install the gem"
 task :install => :package do
-  sh %{sudo gem install pkg/#{GEM_NAME}-#{CHEF_SERVER_VERSION} --no-rdoc --no-ri}
+  sh %{gem install pkg/#{GEM_NAME}-#{CHEF_SERVER_VERSION} --no-rdoc --no-ri}
 end
 
 desc "Uninstall the gem"
 task :uninstall do
-  sh %{sudo gem uninstall #{GEM_NAME} -x -v #{CHEF_SERVER_VERSION} }
+  sh %{gem uninstall #{GEM_NAME} -x -v #{CHEF_SERVER_VERSION} }
 end
 
 desc "Create a gemspec file"

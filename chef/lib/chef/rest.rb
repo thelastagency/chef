@@ -2,6 +2,7 @@
 # Author:: Adam Jacob (<adam@opscode.com>)
 # Author:: Thom May (<thom@clearairturbulence.org>)
 # Author:: Nuo Yan (<nuo@opscode.com>)
+# Author:: Christopher Brown (<cb@opscode.com>)
 # Copyright:: Copyright (c) 2009 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
@@ -19,13 +20,13 @@
 #
 
 require 'chef/mixin/params_validate'
-require 'chef/openid_registration'
 require 'net/https'
 require 'uri'
 require 'json'
 require 'tempfile'
 require 'singleton'
 require 'mixlib/authentication/signedheaderauth'
+require 'chef/api_client'
 
 include Mixlib::Authentication::SignedHeaderAuth
 
@@ -54,7 +55,7 @@ class Chef
     end
 
     def load_signing_key(key)
-      if File.exists?(key) && File.readable?(key)
+      if File.exists?(key)
         IO.read(key)
       else
         raise Chef::Exceptions::PrivateKeyMissing, "I cannot find #{key}, which you told me to use to sign requests!"
@@ -70,7 +71,7 @@ class Chef
 
       nc = Chef::ApiClient.new
       nc.name(name)
-      response = nc.save
+      response = nc.save(true, true)
 
       Chef::Log.debug("Registration response: #{response.inspect}")
 
@@ -154,6 +155,13 @@ class Chef
         http.use_ssl = true 
         if Chef::Config[:ssl_verify_mode] == :verify_none
           http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        elsif Chef::Config[:ssl_verify_mode] == :verify_peer
+          http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+        end
+        if Chef::Config[:ssl_ca_path] and File.exists?(Chef::Config[:ssl_ca_path])
+          http.ca_path = Chef::Config[:ssl_ca_path]
+        elsif Chef::Config[:ssl_ca_file] and File.exists?(Chef::Config[:ssl_ca_file])
+          http.ca_file = Chef::Config[:ssl_ca_file]
         end
         if Chef::Config[:ssl_client_cert] && File.exists?(Chef::Config[:ssl_client_cert])
           http.cert = OpenSSL::X509::Certificate.new(File.read(Chef::Config[:ssl_client_cert]))
@@ -176,6 +184,7 @@ class Chef
       json_body = data ? data.to_json : nil 
 
       if @sign_request
+        raise ArgumentError, "Cannot sign the request without a client name, check that :node_name is assigned" if @client_name.nil?
         Chef::Log.debug("Signing the request as #{@client_name}")
         if json_body
           headers.merge!(sign_request(method, OpenSSL::PKey::RSA.new(@signing_key), @client_name, json_body, "#{url.host}:#{url.port}"))
@@ -257,6 +266,7 @@ class Chef
         raise Timeout::Error, "Timeout connecting to #{url.host}:#{url.port} for #{req.path}, giving up"
       end
       
+    
       if res.kind_of?(Net::HTTPSuccess)
         if res['set-cookie']
           @cookies["#{url.host}:#{url.port}"] = res['set-cookie']

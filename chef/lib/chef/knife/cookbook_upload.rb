@@ -19,6 +19,7 @@
 
 require 'chef/knife'
 require 'chef/streaming_cookbook_uploader'
+require 'chef/cache/checksum'
 
 class Chef
   class Knife
@@ -32,17 +33,51 @@ class Chef
         :description => "A colon-separated path to look for cookbooks in",
         :proc => lambda { |o| o.split(":") }
 
+      option :all,
+        :short => "-a",
+        :long => "--all",
+        :description => "Upload all cookbooks, rather than just a single cookbook"
+
       def run 
+        if config[:cookbook_path]
+          Chef::Config[:cookbook_path] = config[:cookbook_path]
+        else
+          config[:cookbook_path] = Chef::Config[:cookbook_path]
+        end
 
-        config[:cookbook_path] ||= Chef::Config[:cookbook_path]
+        if config[:all] 
+          cl = Chef::CookbookLoader.new
+          cl.each do |cookbook|
+            Chef::Log.info("** #{cookbook.name.to_s} **")
+            upload_cookbook(cookbook.name.to_s)
+          end
+        else
+          upload_cookbook(@name_args[0]) 
+        end
+      end
 
-        cookbook_name = @name_args[0]
+      def test_ruby(cookbook_dir)
+        Dir[File.join(cookbook_dir, '**', '*.rb')].each do |ruby_file|
+          Chef::Log.info("Testing #{ruby_file} for syntax errors...")
+          Chef::Mixin::Command.run_command(:command => "ruby -c #{ruby_file}")
+        end
+      end
+
+      def test_templates(cookbook_dir)
+        Dir[File.join(cookbook_dir, '**', '*.erb')].each do |erb_file|
+          Chef::Log.info("Testing template #{erb_file} for syntax errors...")
+          Chef::Mixin::Command.run_command(:command => "sh -c 'erubis -x #{erb_file} | ruby -c'")
+        end
+      end
+
+      def upload_cookbook(cookbook_name)
+
         if cookbook_name =~ /^#{File::SEPARATOR}/
           child_folders = cookbook_name 
           cookbook_name = File.basename(cookbook_name)
         else
-          child_folders = config[:cookbook_path].reverse.inject([]) do |r, e| 
-            r << File.join(e, @name_args[0])
+          child_folders = config[:cookbook_path].inject([]) do |r, e| 
+            r << File.join(e, cookbook_name)
             r
           end
         end
@@ -57,7 +92,7 @@ class Chef
         tmp_cookbook_dir = tmp_cookbook_path.path
         File.unlink(tmp_cookbook_dir)
         FileUtils.mkdir_p(tmp_cookbook_dir)
-        
+
         Chef::Log.debug("Staging at #{tmp_cookbook_dir}")
 
         found_cookbook = false 
@@ -66,7 +101,7 @@ class Chef
           if File.directory?(file_path)
             found_cookbook = true 
             Chef::Log.info("Copying from #{file_path} to #{tmp_cookbook_dir}")
-            FileUtils.cp_r(file_path, tmp_cookbook_dir)
+            FileUtils.cp_r(file_path, tmp_cookbook_dir, :remove_destination => true)
           else
             Chef::Log.info("Nothing to copy from #{file_path}")
           end
@@ -77,6 +112,15 @@ class Chef
           exit 17
         end
 
+        test_ruby(tmp_cookbook_dir)
+        test_templates(tmp_cookbook_dir)
+
+        # First, generate metadata
+        kcm = Chef::Knife::CookbookMetadata.new
+        kcm.config[:cookbook_path] = [ tmp_cookbook_dir ]
+        kcm.name_args = [ cookbook_name ]
+        kcm.run
+
         Chef::Log.info("Creating tarball at #{tarball_name}")
         Chef::Mixin::Command.run_command(
           :command => "tar -C #{tmp_cookbook_dir} -cvzf #{tarball_name} ./#{cookbook_name}"
@@ -85,10 +129,16 @@ class Chef
         begin
           cb = rest.get_rest("cookbooks/#{cookbook_name}")
           cookbook_uploaded = true
-        rescue Net::HTTPServerException
-          cookbook_uploaded = false
+        rescue Net::HTTPServerException => e
+          case e.response.code
+          when "404"
+            cookbook_uploaded = false
+          when "401"
+            Chef::Log.fatal "Failed to fetch remote cookbook '#{cookbook_name}' due to authentication failure (#{e}), check your client configuration (username, key)"
+            exit 18
+          end
         end
-        Chef::Log.info("Uploading #{cookbook_name} (#{cookbook_uploaded ? 'new version' : 'first time'})")
+
         if cookbook_uploaded
           Chef::StreamingCookbookUploader.put(
             "#{Chef::Config[:chef_server_url]}/cookbooks/#{cookbook_name}/_content", 

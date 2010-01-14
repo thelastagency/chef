@@ -26,7 +26,7 @@ $:.unshift(File.join(File.dirname(__FILE__), "..", "lib"))
 $:.unshift(File.join(File.dirname(__FILE__), "..", "..", "chef-server", "lib"))
 
 require 'chef'
-require File.join(File.dirname(__FILE__), "/../lib/chef/util/fileedit")
+require File.join(File.dirname(__FILE__), "/../lib/chef/util/file_edit")
 
 chef_lib_path = File.expand_path(File.join(File.dirname(__FILE__), '..', 'lib'))
 Dir[
@@ -44,11 +44,21 @@ Dir[File.join(File.dirname(__FILE__), 'lib', '**', '*.rb')].sort.each { |lib| re
 Chef::Config[:log_level] = :fatal
 Chef::Config[:cache_type] = "Memory"
 Chef::Config[:cache_options] = { } 
-Chef::Log.level = Chef::Config.log_level
+Chef::Log.level(Chef::Config.log_level)
 Chef::Config.solo(false)
 
 def redefine_argv(value)
   Object.send(:remove_const, :ARGV)
   Object.send(:const_set, :ARGV, value)
+end
+
+def with_argv(*argv)
+  original_argv = ARGV
+  redefine_argv(argv.flatten)
+  begin
+    yield
+  ensure
+    redefine_argv(original_argv)
+  end
 end
 

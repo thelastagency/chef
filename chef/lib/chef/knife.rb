@@ -1,5 +1,6 @@
 #
 # Author:: Adam Jacob (<adam@opscode.com>)
+# Author:: Christopher Brown (<cb@opscode.com>)
 # Copyright:: Copyright (c) 2009 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
@@ -86,6 +87,10 @@ class Chef
       end
 
       extra = klass_instance.parse_options(args)
+      if klass_instance.config[:help]
+        puts klass_instance.opt_parser
+        exit 1
+      end
       klass_instance.name_args = (extra - cli_bits) || []
       klass_instance.configure_chef
       klass_instance
@@ -108,9 +113,13 @@ class Chef
       Chef::Config[:node_name] = config[:node_name] if config[:node_name]
       Chef::Config[:client_key] = config[:client_key] if config[:client_key]
       Chef::Config[:chef_server_url] = config[:chef_server_url] if config[:chef_server_url]
-      Chef::Log::Formatter.show_time = false
+      Mixlib::Log::Formatter.show_time = false
       Chef::Log.init(Chef::Config[:log_location])
       Chef::Log.level(Chef::Config[:log_level])
+
+      if Chef::Config[:node_name].nil?
+        raise ArgumentError, "No user specified, pass via -u or specifiy 'node_name' in #{config[:config_file] ? config[:config_file] : "~/.chef/knife.rb"}"
+      end
     end
 
     def pretty_print(data)
@@ -148,19 +157,23 @@ class Chef
     end
 
     def edit_data(data, parse_output=true)
-      filename = "knife-edit-"
-      0.upto(20) { filename += rand(9).to_s }
-      filename << ".js"
-      filename = File.join(Dir.tmpdir, filename)
-      tf = File.open(filename, "w")
-      tf.sync = true
-      tf.puts JSON.pretty_generate(data)
-      tf.close
-      raise "Please set EDITOR environment variable" unless system("#{config[:editor]} #{tf.path}") 
-      tf = File.open(filename, "r")
-      output = tf.gets(nil)
-      tf.close
-      File.unlink(filename)
+      output = JSON.pretty_generate(data)
+      
+      if (!config[:no_editor])
+        filename = "knife-edit-"
+        0.upto(20) { filename += rand(9).to_s }
+        filename << ".js"
+        filename = File.join(Dir.tmpdir, filename)
+        tf = File.open(filename, "w")
+        tf.sync = true
+        tf.puts output
+        tf.close
+        raise "Please set EDITOR environment variable" unless system("#{config[:editor]} #{tf.path}") 
+        tf = File.open(filename, "r")
+        output = tf.gets(nil)
+        tf.close
+        File.unlink(filename)
+      end
 
       parse_output ? JSON.parse(output) : output
     end

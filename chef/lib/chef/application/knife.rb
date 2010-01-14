@@ -56,15 +56,19 @@ class Chef::Application::Knife < Chef::Application
     :long         => "--editor EDITOR",
     :description  => "Set the editor to use for interactive commands",
     :default      => ENV['EDITOR']
-
+  
+  option :no_editor,
+    :short        => "-n",
+    :long         => "--no-editor",
+    :description  => "Do not open EDITOR, just accept the data as is",
+    :boolean      => true
+  
   option :help,
     :short        => "-h",
     :long         => "--help",
     :description  => "Show this message",
     :on           => :tail,
-    :boolean      => true,
-    :show_options => true,
-    :exit         => 0
+    :boolean      => true
     
   option :node_name,
     :short => "-u USER",
@@ -101,22 +105,40 @@ class Chef::Application::Knife < Chef::Application
 
   # Run knife 
   def run
-    if ARGV[0] =~ /^-/
-      self.parse_options
-      Chef::Log.fatal("Sorry, you need to pass a sub-command first!") 
-      puts self.opt_parser
-      puts
-      Chef::Knife.list_commands
-      exit 2
-    elsif ARGV.length == 0
-      self.parse_options
-      puts self.opt_parser
-      puts
-      Chef::Knife.list_commands
-      exit 1 
-    end
-
+    validate_and_parse_options
     knife = Chef::Knife.find_command(ARGV, self.class.options)
     knife.run
   end
+  
+  private
+  
+  def validate_and_parse_options
+    # Checking ARGV validity *before* parse_options because parse_options
+    # mangles ARGV in some situations
+    print_help_and_exit(2, "Sorry, you need to pass a sub-command first!") if no_subcommand_given?
+    print_help_and_exit if no_command_given?
+  end
+  
+  def no_subcommand_given?
+    ARGV[0] =~ /^-/
+  end
+  
+  def no_command_given?
+    ARGV.empty?
+  end
+  
+  def print_help_and_exit(exitcode=1, fatal_message=nil)
+    Chef::Log.fatal(fatal_message) if fatal_message
+  
+    begin
+      self.parse_options
+    rescue OptionParser::InvalidOption => e
+      puts "#{e}\n"
+    end
+    puts self.opt_parser
+    puts
+    Chef::Knife.list_commands
+    exit exitcode
+  end
+  
 end
