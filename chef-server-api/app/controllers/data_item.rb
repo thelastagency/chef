@@ -1,6 +1,7 @@
 #
 # Author:: Adam Jacob (<adam@opscode.com>)
 # Author:: Christopher Brown (<cb@opscode.com>)
+# Author:: Nuo Yan (<nuo@opscode.com>)
 # Copyright:: Copyright (c) 2008 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
@@ -26,7 +27,7 @@ class ChefServerApi::DataItem < ChefServerApi::Application
   
   before :populate_data_bag
   before :authenticate_every
-  before :is_admin, :only => [ :create, :destroy ]
+  before :is_admin, :only => [ :create, :update, :destroy ]
 
   def populate_data_bag
     begin
@@ -61,11 +62,37 @@ class ChefServerApi::DataItem < ChefServerApi::Application
     rescue Chef::Exceptions::CouchDBNotFound
       @data_bag_item = Chef::DataBagItem.new
       @data_bag_item.data_bag(@data_bag.name)
+    else 
+      raise Forbidden, "Databag Item #{params[:id]} already exists" if @data_bag_item
     end
     @data_bag_item.raw_data = raw_data
     @data_bag_item.cdb_save
     display @data_bag_item.raw_data
   end
+  
+  def update
+    raw_data = nil
+    if params.has_key?("inflated_object")
+      raw_data = params["inflated_object"].raw_data
+    else
+      raw_data = params
+      raw_data.delete(:action)
+      raw_data.delete(:controller)
+      raw_data.delete(:data_bag_id)
+    end
+        
+    begin 
+      @data_bag_item = Chef::DataBagItem.cdb_load(@data_bag.name, params[:id])
+    rescue Chef::Exceptions::CouchDBNotFound => e
+      raise NotFound, "Cannot load Databag Item #{params[:id]}"
+    end 
+    
+    @data_bag_item.raw_data = raw_data
+    @data_bag_item.cdb_save
+    display @data_bag_item.raw_data
+
+  end 
+  
 
   def destroy
     begin

@@ -21,6 +21,7 @@ require 'chef/config'
 require 'chef/mixin/params_validate'
 require 'chef/mixin/from_file'
 require 'chef/couchdb'
+require 'chef/data_bag_item'
 require 'extlib'
 require 'json'
 
@@ -29,6 +30,7 @@ class Chef
     
     include Chef::Mixin::FromFile
     include Chef::Mixin::ParamsValidate
+    include Chef::IndexQueue::Indexable
     
     DESIGN_DOCUMENT = {
       "version" => 1,
@@ -55,15 +57,15 @@ class Chef
       }
     }
 
-    attr_accessor :couchdb_rev, :raw_data, :couchdb_id
+    attr_accessor :couchdb_rev, :raw_data, :couchdb_id, :couchdb
     
     # Create a new Chef::DataBagItem
     def initialize(couchdb=nil)
       @couchdb_rev = nil
       @couchdb_id = nil
       @data_bag = nil
-      @raw_data = Hash.new
-      @couchdb = Chef::CouchDB.new 
+      @raw_data = Mash.new
+      @couchdb = couchdb ? couchdb : Chef::CouchDB.new
     end
 
     def raw_data
@@ -150,7 +152,7 @@ class Chef
         bag_item.couchdb_id = o["_id"] 
         o.delete("_id")
       end
-      bag_item.raw_data = o["raw_data"]
+      bag_item.raw_data = Mash.new(o["raw_data"])
       bag_item
     end
 
@@ -160,8 +162,8 @@ class Chef
     end
     
     # Load a Data Bag Item by name from CouchDB
-    def self.cdb_load(data_bag, name)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_load(data_bag, name, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       couchdb.load("data_bag_item", object_name(data_bag, name))
     end
     
@@ -177,9 +179,9 @@ class Chef
       removed
     end
     
-    def destroy(data_bag=data_bag)
+    def destroy(data_bag=data_bag, databag_item=name)
       r = Chef::REST.new(Chef::Config[:chef_server_url])
-      r.delete_rest("data/#{data_bag}/#{@name}")
+      r.delete_rest("data/#{data_bag}/#{databag_item}")
     end
      
     # Save this Data Bag Item to CouchDB
@@ -188,10 +190,11 @@ class Chef
       @couchdb_rev = results["rev"]
     end
     
-    def save
+    # Save this Data Bag Item via RESTful API
+    def save(item_id=@raw_data['id'])
       r = Chef::REST.new(Chef::Config[:chef_server_url])
       begin
-        r.put_rest("data/#{data_bag}/#{@raw_data['id']}", @raw_data)
+        r.put_rest("data/#{data_bag}/#{item_id}", @raw_data)
       rescue Net::HTTPServerException => e
         if e.response.code == "404"
           r.post_rest("data/#{data_bag}", @raw_data) 
@@ -202,9 +205,16 @@ class Chef
       self
     end
     
+    # Create this Data Bag Item via RESTful API
+    def create
+      r = Chef::REST.new(Chef::Config[:chef_server_url])
+      r.post_rest("data/#{data_bag}", @raw_data) 
+      self
+    end 
+    
     # Set up our CouchDB design document
-    def self.create_design_document
-      couchdb = Chef::CouchDB.new
+    def self.create_design_document(couchdb=nil)
+      couchdb ||= Chef::CouchDB.new
       couchdb.create_design_document("data_bag_items", DESIGN_DOCUMENT)
     end
     

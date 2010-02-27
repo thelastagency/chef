@@ -125,6 +125,19 @@ describe Chef::Provider::Subversion do
       @provider.revision_int.should eql("11410")
     end
     
+    it "returns a helpful message if data from `svn info` can't be parsed" do
+      example_svn_info =  "some random crap from an error message\n" 
+      exitstatus = mock("exitstatus")
+      exitstatus.stub!(:exitstatus).and_return(0)
+      @resource.revision "HEAD"
+      @stdout.stub!(:string).and_return(example_svn_info)
+      @stderr.stub!(:string).and_return("")
+      @provider.should_receive(:popen4).and_yield("no-pid","no-stdin",@stdout,@stderr).
+                                        and_return(exitstatus)
+      lambda {@provider.revision_int}.should raise_error(RuntimeError, "Could not parse `svn info` data: some random crap from an error message")
+      
+    end
+    
     it "responds to :revision_slug as an alias for revision_sha" do
       @provider.should respond_to(:revision_slug)
     end
@@ -156,9 +169,29 @@ describe Chef::Provider::Subversion do
     @provider.export_command.should eql("svn export -q  -r12345 http://svn.example.org/trunk/ /my/deploy/dir")
   end
   
+  it "generates an export command with the --force option" do
+    expected = "svn export --force -q  -r12345 http://svn.example.org/trunk/ /my/deploy/dir"
+    @provider.export_command(:force => true).should == expected
+  end
+  
+  it "runs an export with the --force option" do
+    expected_cmd = "svn export --force -q  -r12345 http://svn.example.org/trunk/ /my/deploy/dir"
+    @provider.should_receive(:run_command).with(:command => expected_cmd)
+    @provider.action_force_export
+  end
+  
   it "runs the checkout command for action_checkout" do
     expected_cmd = "svn checkout -q  -r12345 http://svn.example.org/trunk/ /my/deploy/dir"
     @provider.should_receive(:run_command).with(:command => expected_cmd)
+    @resource.should_receive(:updated=).at_least(1).times.with(true)
+    @provider.action_checkout
+  end
+  
+  it "runs commands with the user and group specified in the resource" do
+    @resource.user "whois"
+    @resource.group "thisis"
+    expected_cmd = "svn checkout -q  -r12345 http://svn.example.org/trunk/ /my/deploy/dir"
+    @provider.should_receive(:run_command).with(:command => expected_cmd, :user => "whois", :group => "thisis")
     @resource.should_receive(:updated=).at_least(1).times.with(true)
     @provider.action_checkout
   end

@@ -48,8 +48,7 @@ class Chef
     end
     
     def build_provider(resource)
-      provider_klass = resource.provider
-      provider_klass ||= Chef::Platform.find_provider_for_node(@node, resource)
+      provider_klass = Chef::Platform.find_provider_for_node(@node, resource)
       Chef::Log.debug("#{resource} using #{provider_klass.to_s}")
       provider = provider_klass.new(@node, resource, @collection, @definitions, @cookbook_loader)
       provider.load_current_resource
@@ -71,7 +70,10 @@ class Chef
           if resource.actions[action].has_key?(:delayed)
             resource.actions[action][:delayed].each do |r|
               @delayed_actions[r] = Hash.new unless @delayed_actions.has_key?(r)
-              @delayed_actions[r][action] = Array.new unless @delayed_actions[r].has_key?(action)
+              unless @delayed_actions[r].has_key?(action)
+                @ordered_delayed_actions << [r, action]
+                @delayed_actions[r][action] = Array.new
+              end
               @delayed_actions[r][action] << lambda {
                 Chef::Log.info("#{resource} sending #{action} action to #{r} (delayed)")
               } 
@@ -84,6 +86,7 @@ class Chef
     def converge
 
       @delayed_actions = Hash.new
+      @ordered_delayed_actions = []
       
       @collection.execute_each_resource do |resource|
         begin
@@ -91,7 +94,7 @@ class Chef
           
           # Check if this resource has an only_if block - if it does, skip it.
           if resource.only_if
-            unless Chef::Mixin::Command.only_if(resource.only_if)
+            unless Chef::Mixin::Command.only_if(resource.only_if, resource.only_if_args)
               Chef::Log.debug("Skipping #{resource} due to only_if")
               next
             end
@@ -99,7 +102,7 @@ class Chef
           
           # Check if this resource has a not_if block - if it does, skip it.
           if resource.not_if
-            unless Chef::Mixin::Command.not_if(resource.not_if)
+            unless Chef::Mixin::Command.not_if(resource.not_if, resource.not_if_args)
               Chef::Log.debug("Skipping #{resource} due to not_if")
               next
             end
@@ -117,11 +120,10 @@ class Chef
       end
       
       # Run all our :delayed actions
-      @delayed_actions.each do |resource, action_hash| 
-        action_hash.each do |action, log_array|
-          log_array.each { |l| l.call } # Call each log message
-          run_action(resource, action)
-        end
+      @ordered_delayed_actions.each do |resource, action| 
+        log_array = @delayed_actions[resource][action]
+        log_array.each { |l| l.call } # Call each log message
+        run_action(resource, action)
       end
 
       true

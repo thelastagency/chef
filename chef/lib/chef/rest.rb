@@ -2,6 +2,7 @@
 # Author:: Adam Jacob (<adam@opscode.com>)
 # Author:: Thom May (<thom@clearairturbulence.org>)
 # Author:: Nuo Yan (<nuo@opscode.com>)
+# Author:: Christopher Brown (<cb@opscode.com>)
 # Copyright:: Copyright (c) 2009 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
@@ -19,13 +20,13 @@
 #
 
 require 'chef/mixin/params_validate'
-require 'chef/openid_registration'
 require 'net/https'
 require 'uri'
 require 'json'
 require 'tempfile'
 require 'singleton'
 require 'mixlib/authentication/signedheaderauth'
+require 'chef/api_client'
 
 include Mixlib::Authentication::SignedHeaderAuth
 
@@ -36,21 +37,25 @@ class Chef
       include Singleton
     end
     
-    attr_accessor :url, :cookies, :signing_key
+    attr_accessor :url, :cookies, :client_name, :signing_key, :signing_key_filename, :sign_on_redirect, :sign_request
     
-    def initialize(url, client_name=Chef::Config[:node_name], signing_key=Chef::Config[:client_key])
+    def initialize(url, client_name=Chef::Config[:node_name], signing_key_filename=Chef::Config[:client_key])
       @url = url
       @cookies = CookieJar.instance
       @client_name = client_name
-      if signing_key
-        @signing_key = load_signing_key(signing_key) 
+      if signing_key_filename
+        @signing_key_filename = signing_key_filename
+        @signing_key = load_signing_key(signing_key_filename) 
+        @sign_request = true
       else
         @signing_key = nil
+        @sign_request = false
       end
+      @sign_on_redirect = true
     end
 
     def load_signing_key(key)
-      if File.exists?(key) && File.readable?(key)
+      if File.exists?(key)
         IO.read(key)
       else
         raise Chef::Exceptions::PrivateKeyMissing, "I cannot find #{key}, which you told me to use to sign requests!"
@@ -64,14 +69,9 @@ class Chef
         raise Chef::Exceptions::CannotWritePrivateKey, "I cannot write your private key to #{destination} - check permissions?" unless File.writable?(destination)
       end
 
-      # First, try and create a new registration
-      begin
-        Chef::Log.info("Registering API Client #{name}")
-        response = post_rest("clients", {:name => name})
-      rescue Net::HTTPServerException 
-        # If that fails, go ahead and try and update it
-        response = put_rest("clients/#{name}", { :name => name, :private_key => true }) 
-      end
+      nc = Chef::ApiClient.new
+      nc.name(name)
+      response = nc.save(true, true)
 
       Chef::Log.debug("Registration response: #{response.inspect}")
 
@@ -155,6 +155,13 @@ class Chef
         http.use_ssl = true 
         if Chef::Config[:ssl_verify_mode] == :verify_none
           http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        elsif Chef::Config[:ssl_verify_mode] == :verify_peer
+          http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+        end
+        if Chef::Config[:ssl_ca_path] and File.exists?(Chef::Config[:ssl_ca_path])
+          http.ca_path = Chef::Config[:ssl_ca_path]
+        elsif Chef::Config[:ssl_ca_file] and File.exists?(Chef::Config[:ssl_ca_file])
+          http.ca_file = Chef::Config[:ssl_ca_file]
         end
         if Chef::Config[:ssl_client_cert] && File.exists?(Chef::Config[:ssl_client_cert])
           http.cert = OpenSSL::X509::Certificate.new(File.read(Chef::Config[:ssl_client_cert]))
@@ -176,7 +183,8 @@ class Chef
 
       json_body = data ? data.to_json : nil 
 
-      if @signing_key
+      if @sign_request
+        raise ArgumentError, "Cannot sign the request without a client name, check that :node_name is assigned" if @client_name.nil?
         Chef::Log.debug("Signing the request as #{@client_name}")
         if json_body
           headers.merge!(sign_request(method, OpenSSL::PKey::RSA.new(@signing_key), @client_name, json_body, "#{url.host}:#{url.port}"))
@@ -211,7 +219,7 @@ class Chef
         raise ArgumentError, "You must provide :GET, :PUT, :POST or :DELETE as the method"
       end
 
-      Chef::Log.debug("Sending HTTP Request via #{req.method} to #{url.host}:#{url.port}/#{req.path}")
+      Chef::Log.debug("Sending HTTP Request via #{req.method} to #{url.host}:#{url.port}#{req.path}")
       
       # Optionally handle HTTP Basic Authentication
       req.basic_auth(url.user, url.password) if url.user
@@ -258,6 +266,7 @@ class Chef
         raise Timeout::Error, "Timeout connecting to #{url.host}:#{url.port} for #{req.path}, giving up"
       end
       
+    
       if res.kind_of?(Net::HTTPSuccess)
         if res['set-cookie']
           @cookies["#{url.host}:#{url.port}"] = res['set-cookie']
@@ -276,8 +285,13 @@ class Chef
         if res['set-cookie']
           @cookies["#{url.host}:#{url.port}"] = res['set-cookie']
         end
+        @sign_request = false if @sign_on_redirect == false
         run_request(:GET, create_url(res['location']), {}, false, limit - 1, raw)
       else
+        if res['content-type'] =~ /json/
+          exception = JSON.parse(res.body)
+          Chef::Log.warn("HTTP Request Returned #{res.code} #{res.message}: #{exception["error"].respond_to?(:join) ? exception["error"].join(", ") : exception["error"]}")
+        end
         res.error!
       end
     end

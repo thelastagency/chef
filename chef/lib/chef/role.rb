@@ -21,6 +21,8 @@ require 'chef/config'
 require 'chef/mixin/params_validate'
 require 'chef/mixin/from_file'
 require 'chef/couchdb'
+require 'chef/run_list'
+require 'chef/index_queue'
 require 'extlib'
 require 'json'
 
@@ -29,6 +31,7 @@ class Chef
     
     include Chef::Mixin::FromFile
     include Chef::Mixin::ParamsValidate
+    include Chef::IndexQueue::Indexable
     
     DESIGN_DOCUMENT = {
       "version" => 6,
@@ -55,18 +58,18 @@ class Chef
       }
     }
 
-    attr_accessor :couchdb_rev, :couchdb_id
+    attr_accessor :couchdb_rev, :couchdb_id, :couchdb
     
     # Create a new Chef::Role object.
-    def initialize
+    def initialize(couchdb=nil)
       @name = '' 
       @description = '' 
       @default_attributes = Mash.new
       @override_attributes = Mash.new
-      @recipes = Array.new 
+      @run_list = Chef::RunList.new 
       @couchdb_rev = nil
       @couchdb_id = nil
-      @couchdb = Chef::CouchDB.new 
+      @couchdb = couchdb ? couchdb : Chef::CouchDB.new
     end
 
     def name(arg=nil) 
@@ -85,15 +88,19 @@ class Chef
       )
     end
 
-    def recipes(*arg) 
-      arg.flatten!
-      if arg.length == 0
-        @recipes
+    def run_list(*args)
+      if args.length > 0
+        @run_list.reset(args)
       else
-        arg.each do |entry|
-          raise ArgumentError, 'Recipes must be strings!' unless entry.kind_of?(String)
-        end
-        @recipes = arg
+        @run_list
+      end
+    end
+        
+    def recipes(*args) 
+      if args.length > 0
+        @run_list.reset(args)
+      else
+        @run_list.recipes
       end
     end
 
@@ -121,7 +128,7 @@ class Chef
         "default_attributes" => @default_attributes,
         "override_attributes" => @override_attributes,
         "chef_type" => "role",
-        "recipes" => @recipes,
+        "run_list" => @run_list.run_list
       }
       result["_rev"] = @couchdb_rev if @couchdb_rev
       result
@@ -139,7 +146,11 @@ class Chef
       role.description(o["description"])
       role.default_attributes(o["default_attributes"])
       role.override_attributes(o["override_attributes"])
-      role.recipes(o["recipes"])
+      if o.has_key?("run_list")
+        role.run_list(o["run_list"]) if o.has_key?("run_list")
+      else
+        role.run_list(o["recipes"]) 
+      end
       role.couchdb_rev = o["_rev"] if o.has_key?("_rev")
       role.couchdb_id = o["_id"] if o.has_key?("_id")
       role 
@@ -147,8 +158,8 @@ class Chef
     
     # List all the Chef::Role objects in the CouchDB.  If inflate is set to true, you will get
     # the full list of all Roles, fully inflated.
-    def self.cdb_list(inflate=false)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_list(inflate=false, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       rs = couchdb.list("roles", inflate)
       if inflate
         rs["rows"].collect { |r| r["value"] }
@@ -163,7 +174,7 @@ class Chef
       if inflate
         response = Hash.new
         Chef::Search::Query.new.search(:role) do |n|
-          response[n.name] = n
+          response[n.name] = n unless n.nil?
         end
         response
       else
@@ -172,8 +183,8 @@ class Chef
     end
     
     # Load a role by name from CouchDB
-    def self.cdb_load(name)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_load(name, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       couchdb.load("role", name)
     end
     
@@ -245,8 +256,8 @@ class Chef
     end 
     
     # Set up our CouchDB design document
-    def self.create_design_document
-      couchdb = Chef::CouchDB.new
+    def self.create_design_document(couchdb=nil)
+      couchdb ||= Chef::CouchDB.new
       couchdb.create_design_document("roles", DESIGN_DOCUMENT)
     end
     

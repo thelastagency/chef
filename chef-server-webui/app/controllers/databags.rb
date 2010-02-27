@@ -23,18 +23,59 @@ class ChefServerWebui::Databags < ChefServerWebui::Application
   provides :html, :json
   before :login_required 
   
-  def index
-    r = Chef::REST.new(Chef::Config[:chef_server_url])
-    @databags = r.get_rest("data")
+  def new
+    @databag = Chef::DataBag.new
     render
+  end 
+  
+  def create
+    begin
+      @databag = Chef::DataBag.new
+      @databag.name params[:name]
+      @databag.create
+      redirect(slice_url(:databags), :message => { :notice => "Created Databag #{@databag.name}" })
+    rescue StandardError => e
+      @_message = { :error => $! } 
+      render :new
+    end 
+  end
+  
+  def index
+    begin
+      r = Chef::REST.new(Chef::Config[:chef_server_url])
+      @databags = r.get_rest("data")
+      render
+    rescue
+      @_message = { :error => $! } 
+      @databags = {}
+      render
+    end
   end
 
   def show
-    @databag_name = params[:id]
-    r = Chef::REST.new(Chef::Config[:chef_server_url])
-    @databag = r.get_rest("data/#{params[:id]}")
-    raise NotFound unless @databag
-    display @databag
+    begin
+      @databag_name = params[:id]
+      r = Chef::REST.new(Chef::Config[:chef_server_url])
+      @databag = r.get_rest("data/#{params[:id]}")
+      raise NotFound unless @databag
+      display @databag
+    rescue
+      @databags = Chef::DataBag.list
+      @_message =  { :error => $!}    
+      render :index
+    end 
+  end
+  
+  def destroy
+    begin
+      r = Chef::REST.new(Chef::Config[:chef_server_url])
+      r.delete_rest("data/#{params[:id]}")
+      redirect(absolute_slice_url(:databags), {:message => { :notice => "Data bag #{params[:id]} deleted successfully" }, :permanent => true})
+    rescue
+      @databags = Chef::DataBag.list
+      @_message =  { :error => $!}
+      render :index
+    end 
   end
   
 end

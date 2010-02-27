@@ -45,21 +45,14 @@ def setup_logging
   Merb.logger.auto_flush = true
   if ENV['DEBUG'] == 'true' || ENV['LOG_LEVEL'] == 'debug'
     Chef::Config[:log_level] = :debug
-    Chef::Log.level(:debug)
+    Chef::Log.level = :debug
     Merb.logger.set_log(STDOUT, :debug) 
   else
     Chef::Config[:log_level] = ENV['LOG_LEVEL'].to_sym 
-    Chef::Log.level(ENV['LOG_LEVEL'].to_sym)
+    Chef::Log.level = ENV['LOG_LEVEL'].to_sym
     Merb.logger.set_log(STDOUT, ENV['LOG_LEVEL'].to_sym)
   end
-  Nanite::Log.logger = Ohai::Log.logger = Chef::Log.logger 
-end
-
-def setup_nanite
-  Chef::Config[:nanite_identity] = "chef-integration-test"
-  Chef::Nanite.in_event { Chef::Log.debug("Nanite is up!") } 
-  Chef::Log.debug("Waiting for Nanites to register with us as a mapper")
-  sleep 10
+  Ohai::Log.logger = Chef::Log.logger 
 end
 
 def delete_databases
@@ -117,7 +110,6 @@ Merb.start_environment(
 # Pre-testing setup
 ###
 setup_logging
-setup_nanite
 cleanup
 delete_databases
 create_databases
@@ -150,6 +142,10 @@ module ChefWorld
 
   def tmpdir
     @tmpdir ||= File.join(Dir.tmpdir, "chef_integration")
+  end
+
+  def server_tmpdir
+    @server_tmpdir ||= File.expand_path(File.join(datadir, "tmp"))
   end
   
   def datadir

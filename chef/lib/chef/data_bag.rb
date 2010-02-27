@@ -22,6 +22,7 @@ require 'chef/mixin/params_validate'
 require 'chef/mixin/from_file'
 require 'chef/couchdb'
 require 'chef/data_bag_item'
+require 'chef/index_queue'
 require 'extlib'
 require 'json'
 
@@ -30,6 +31,7 @@ class Chef
     
     include Chef::Mixin::FromFile
     include Chef::Mixin::ParamsValidate
+    include Chef::IndexQueue::Indexable
     
     DESIGN_DOCUMENT = {
       "version" => 2,
@@ -65,14 +67,14 @@ class Chef
       }
     }
 
-    attr_accessor :couchdb_rev, :couchdb_id
+    attr_accessor :couchdb_rev, :couchdb_id, :couchdb
     
     # Create a new Chef::DataBag
-    def initialize
+    def initialize(couchdb=nil)
       @name = '' 
       @couchdb_rev = nil
       @couchdb_id = nil
-      @couchdb = Chef::CouchDB.new 
+      @couchdb = couchdb ? couchdb : Chef::CouchDB.new
     end
 
     def name(arg=nil) 
@@ -109,8 +111,8 @@ class Chef
     
     # List all the Chef::DataBag objects in the CouchDB.  If inflate is set to true, you will get
     # the full list of all Roles, fully inflated.
-    def self.cdb_list(inflate=false)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_list(inflate=false, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       rs = couchdb.list("data_bags", inflate)
       if inflate
         rs["rows"].collect { |r| r["value"] }
@@ -133,8 +135,8 @@ class Chef
     end
     
     # Load a Data Bag by name from CouchDB
-    def self.cdb_load(name)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_load(name, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       couchdb.load("data_bag", name)
     end
     
@@ -179,8 +181,16 @@ class Chef
       end
       self
     end
+    
+    #create a data bag via RESTful API
+    def create
+      r = Chef::REST.new(Chef::Config[:chef_server_url])
+      r.post_rest("data", self)
+      self
+    end
 
-    # List all the items in this Bag
+    # List all the items in this Bag from CouchDB
+    # The self.load method does this through the REST API
     def list(inflate=false)
       rs = nil 
       if inflate
@@ -193,8 +203,8 @@ class Chef
     end
     
     # Set up our CouchDB design document
-    def self.create_design_document
-      couchdb = Chef::CouchDB.new
+    def self.create_design_document(couchdb=nil)
+      couchdb ||= Chef::CouchDB.new
       couchdb.create_design_document("data_bags", DESIGN_DOCUMENT)
     end
     

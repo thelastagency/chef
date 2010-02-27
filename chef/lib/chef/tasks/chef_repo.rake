@@ -24,6 +24,20 @@ require 'chef/cookbook/metadata'
 require 'tempfile'
 require 'rake'
 
+# Allow REMOTE options to be overridden on the command line
+REMOTE_HOST = ENV["REMOTE_HOST"] if ENV["REMOTE_HOST"] != nil
+REMOTE_SUDO = ENV["REMOTE_SUDO"] if ENV["REMOTE_SUDO"] != nil
+if defined? REMOTE_HOST
+  REMOTE_PATH_PREFIX = "#{REMOTE_HOST}:"
+  REMOTE_EXEC_PREFIX = "ssh #{REMOTE_HOST}"
+  REMOTE_EXEC_PREFIX += " sudo" if defined? REMOTE_SUDO
+  LOCAL_EXEC_PREFIX = ""
+else
+  REMOTE_PATH_PREFIX = ""
+  REMOTE_EXEC_PREFIX = ""
+  LOCAL_EXEC_PREFIX = "sudo"
+end
+
 desc "Update your repository from source control"
 task :update do
   puts "** Updating your repository"
@@ -33,7 +47,6 @@ task :update do
     sh %{svn up}
   when :git
     pull = false
-    pull = true if File.join(TOPDIR, ".git", "remotes", "origin")
     IO.foreach(File.join(TOPDIR, ".git", "config")) do |line|
       pull = true if line =~ /\[remote "origin"\]/
     end
@@ -47,124 +60,15 @@ task :update do
   end
 end
 
-desc "Test your cookbooks for syntax errors"
-task :test_recipes do
-  puts "** Testing your cookbooks for syntax errors"
-
-  if File.exists?(TEST_CACHE)
-    cache = JSON.load(open(TEST_CACHE).read)
-    trap("INT") { puts "INT received, flushing test cache"; write_cache(cache) }
-  else
-    cache = {}
-  end
-
-  recipes = ["*cookbooks"].map { |folder|
-    Dir[File.join(TOPDIR, folder, "**", "*.rb")]
-  }.flatten
-
-  recipes.each do |recipe|
-    print "Testing recipe #{recipe}: "
-
-    recipe_mtime = File.stat(recipe).mtime.to_s
-    if cache.has_key?(recipe)
-      if cache[recipe]["mtime"] == recipe_mtime 
-         puts "No modification since last test."
-         next
-      end
-    else
-      cache[recipe] = {}
-    end
-
-
-    sh %{ruby -c #{recipe}} do |ok, res|
-      if ok
-        cache[recipe]["mtime"] = recipe_mtime
-      else
-        write_cache(cache)
-        raise "Syntax error in #{recipe}"
-      end
-    end
-  end
-
-  write_cache(cache)
-end
-
-desc "Test your templates for syntax errors"
-task :test_templates do
-  puts "** Testing your cookbooks for syntax errors"
-
-  if File.exists?(TEST_CACHE)
-    cache = JSON.load(open(TEST_CACHE).read)
-    trap("INT") { puts "INT received, flushing test cache"; write_cache(cache) }
-  else
-    cache = {}
-  end
-
-  templates = ["*cookbooks"].map { |folder|
-    Dir[File.join(TOPDIR, folder, "**", "*.erb")]
-  }.flatten
-
-  templates.each do |template|
-    print "Testing template #{template}: "
-
-    template_mtime = File.stat(template).mtime.to_s
-    if cache.has_key?(template)
-      if cache[template]["mtime"] == template_mtime 
-         puts "No change since last test."
-         next
-      end
-    else
-      cache[template] = {}
-    end
-
-    sh %{erubis -x #{template} | ruby -c} do |ok, res|
-      if ok
-        cache[template]["mtime"] = template_mtime
-      else
-        write_cache(cache)
-        raise "Syntax error in #{template}"
-      end
-    end
-
-  end
-
-  write_cache(cache)
-end
-
-desc "Test your cookbooks for syntax errors"
-task :test => [ :test_recipes , :test_templates ]
-
-def write_cache(cache)
-  File.open(TEST_CACHE, "w") { |f| JSON.dump(cache, f) }
-end
-
 desc "Install the latest copy of the repository on this Chef Server"
-task :install => [ :update, :test, :metadata, :roles ] do
-  puts "** Installing your cookbooks"  
-  directories = [ 
-    COOKBOOK_PATH,
-    SITE_COOKBOOK_PATH,
-    CHEF_CONFIG_PATH
-  ]
-  puts "* Creating Directories"
-  directories.each do |dir|
-    sh "sudo mkdir -p #{dir}"
-    sh "sudo chown root #{dir}"
-  end
-  puts "* Installing new Cookbooks"
-  sh "sudo rsync -rlP --delete --exclude '.svn' --exclude '.git*' cookbooks/ #{COOKBOOK_PATH}"
-  puts "* Installing new Site Cookbooks"
-  sh "sudo rsync -rlP --delete --exclude '.svn' --exclude '.git*' site-cookbooks/ #{SITE_COOKBOOK_PATH}"
-  puts "* Installing new Node Roles"
-  sh "sudo rsync -rlP --delete --exclude '.svn' --exclude '.git*' roles/ #{ROLE_PATH}"
-  
-  if File.exists?(File.join(File.dirname(__FILE__), "config", "server.rb"))
+task :install => [ :update, :roles, :upload_cookbooks ] do
+  if File.exists?(File.join(TOPDIR, "config", "server.rb"))
     puts "* Installing new Chef Server Config"
-    sh "sudo cp config/server.rb #{CHEF_SERVER_CONFIG}"
+    sh "#{LOCAL_EXEC_PREFIX} rsync -rlt --delete --exclude '.svn' --exclude '.git*' config/server.rb #{REMOTE_PATH_PREFIX}#{CHEF_SERVER_CONFIG}"
   end
-  if File.exists?(File.join(File.dirname(__FILE__), "config", "client.rb"))
+  if File.exists?(File.join(TOPDIR, "config", "client.rb"))
     puts "* Installing new Chef Client Config"
-    sh "sudo cp config/client.rb #{CHEF_CLIENT_CONFIG}"
+    sh "#{LOCAL_EXEC_PREFIX} rsync -rlt --delete --exclude '.svn' --exclude '.git*' config/client.rb #{REMOTE_PATH_PREFIX}#{CHEF_CLIENT_CONFIG}"
   end
 end
 
@@ -279,12 +183,13 @@ task :ssl_cert do
   fqdn =~ /^(.+?)\.(.+)$/
   hostname = $1
   domain = $2
+  keyfile = fqdn.gsub("*", "wildcard")
   raise "Must provide FQDN!" unless fqdn && hostname && domain
   puts "** Creating self signed SSL Certificate for #{fqdn}"
-  sh("(cd #{CADIR} && openssl genrsa 2048 > #{fqdn}.key)")
-  sh("(cd #{CADIR} && chmod 644 #{fqdn}.key)")
+  sh("(cd #{CADIR} && openssl genrsa 2048 > #{keyfile}.key)")
+  sh("(cd #{CADIR} && chmod 644 #{keyfile}.key)")
   puts "* Generating Self Signed Certificate Request"
-  tf = Tempfile.new("#{fqdn}.ssl-conf")
+  tf = Tempfile.new("#{keyfile}.ssl-conf")
   ssl_config = <<EOH
 [ req ]
 distinguished_name = req_distinguished_name
@@ -301,107 +206,40 @@ emailAddress           = #{SSL_EMAIL_ADDRESS}
 EOH
   tf.puts(ssl_config)
   tf.close
-  sh("(cd #{CADIR} && openssl req -config '#{tf.path}' -new -x509 -nodes -sha1 -days 3650 -key #{fqdn}.key > #{fqdn}.crt)")
-  sh("(cd #{CADIR} && openssl x509 -noout -fingerprint -text < #{fqdn}.crt > #{fqdn}.info)")
-  sh("(cd #{CADIR} && cat #{fqdn}.crt #{fqdn}.key > #{fqdn}.pem)")
-  sh("(cd #{CADIR} && chmod 644 #{fqdn}.pem)")
+  sh("(cd #{CADIR} && openssl req -config '#{tf.path}' -new -x509 -nodes -sha1 -days 3650 -key #{keyfile}.key > #{keyfile}.crt)")
+  sh("(cd #{CADIR} && openssl x509 -noout -fingerprint -text < #{keyfile}.crt > #{keyfile}.info)")
+  sh("(cd #{CADIR} && cat #{keyfile}.crt #{keyfile}.key > #{keyfile}.pem)")
+  sh("(cd #{CADIR} && chmod 644 #{keyfile}.pem)")
+end
+
+rule(%r{\b(?:site-)?cookbooks/[^/]+/metadata\.json\Z} => [ proc { |task_name| task_name.sub(/\.[^.]+$/, '.rb') } ]) do |t|
+  system("knife cookbook metadata #{t.source}")
 end
 
 desc "Build cookbook metadata.json from metadata.rb"
-task :metadata do
-  Chef::Config[:cookbook_path] = [ File.join(TOPDIR, 'cookbooks'), File.join(TOPDIR, 'site-cookbooks') ]
-  cl = Chef::CookbookLoader.new
-  cl.each do |cookbook|
-    if ENV['COOKBOOK']
-      next unless cookbook.name.to_s == ENV['COOKBOOK']
-    end
-    cook_meta = Chef::Cookbook::Metadata.new(cookbook)
-    Chef::Config.cookbook_path.each do |cdir|
-      metadata_rb_file = File.join(cdir, cookbook.name.to_s, 'metadata.rb')
-      metadata_json_file = File.join(cdir, cookbook.name.to_s, 'metadata.json')
-      if File.exists?(metadata_rb_file)
-        puts "Generating metadata for #{cookbook.name}"
-        cook_meta.from_file(metadata_rb_file)
-        File.open(metadata_json_file, "w") do |f| 
-          f.write(JSON.pretty_generate(cook_meta))
-        end
-      end
-    end
-  end
+task :metadata => FileList[File.join(TOPDIR, '*cookbooks', ENV['COOKBOOK'] || '*', 'metadata.rb')].pathmap('%X.json')
+
+rule(%r{\broles/\S+\.json\Z} => [ proc { |task_name| task_name.sub(/\.[^.]+$/, '.rb') } ]) do |t|
+  system("knife role from file #{t.source}")
 end
 
-desc "Build roles from roles/role_name.json from role_name.rb"
-task :roles do
-  Chef::Config[:role_path] = File.join(TOPDIR, 'roles')
-  Dir[File.join(TOPDIR, 'roles', '**', '*.rb')].each do |role_file|
-    short_name = File.basename(role_file, '.rb')
-    puts "Generating role JSON for #{short_name}"
-    role = Chef::Role.new
-    role.name(short_name)
-    role.from_file(role_file)
-    File.open(File.join(TOPDIR, 'roles', "#{short_name}.json"), "w") do |f|
-      f.write(JSON.pretty_generate(role))
-    end
-  end
+desc "Update roles"
+task :roles  => FileList[File.join(TOPDIR, 'roles', '**', '*.rb')].pathmap('%X.json')
+
+desc "Update a specific role"
+task :role, :role_name do |t, args|
+  system("knife role from file #{args.cookbook}")
 end
 
 desc "Upload all cookbooks"
 task :upload_cookbooks => [ :metadata ]
 task :upload_cookbooks do
-  Chef::Config[:cookbook_path] = [ File.join(TOPDIR, 'cookbooks'), File.join(TOPDIR, 'site-cookbooks') ]
-  cl = Chef::CookbookLoader.new
-  cl.each do |cookbook|
-    cook_meta = Chef::Cookbook::Metadata.new(cookbook)
-    upload_single_cookbook(cookbook.name.to_s, cook_meta.version)
-    puts "* Uploaded #{cookbook.name.to_s}"
-  end
+  system("knife cookbook upload --all")
 end
 
 desc "Upload a single cookbook"
 task :upload_cookbook => [ :metadata ]
 task :upload_cookbook, :cookbook do |t, args|
-  upload_single_cookbook(args.cookbook)
-  puts "* Uploaded #{args.cookbook}"
-end
-
-def upload_single_cookbook(cookbook_name, version=nil)
-  require 'chef/streaming_cookbook_uploader'
-  Chef::Log.level(:error)
-  Mixlib::Authentication::Log.logger = Chef::Log.logger
-  raise ArgumentError, "OPSCODE_KEY must be set to your API Key" unless ENV.has_key?("OPSCODE_KEY")
-  raise ArgumentError, "OPSCODE_USER must be set to your Username" unless ENV.has_key?("OPSCODE_USER")
-
-  Chef::Config.from_file("/etc/chef/client.rb")
-
-  tarball_name = "#{cookbook_name}.tar.gz"
-  temp_dir = File.join(Dir.tmpdir, "chef-upload-cookbooks")
-  temp_cookbook_dir = File.join(temp_dir, cookbook_name)
-  FileUtils.mkdir(temp_dir) 
-  FileUtils.mkdir(temp_cookbook_dir)
- 
-  child_folders = [ "cookbooks/#{cookbook_name}", "site-cookbooks/#{cookbook_name}" ]
-  child_folders.each do |folder|
-    file_path = File.join(TOPDIR, folder, ".")
-    FileUtils.cp_r(file_path, temp_cookbook_dir) if File.directory?(file_path)
-  end 
-      
-  system("tar", "-C", temp_dir, "-czf", File.join(temp_dir, tarball_name), "./#{cookbook_name}")
-
-  r = Chef::REST.new(Chef::Config[:chef_server_url], ENV['OPSCODE_USER'], ENV['OPSCODE_KEY'])
-  begin
-    cb = r.get_rest("cookbooks/#{cookbook_name}")
-    cookbook_uploaded = true
-  rescue Net::HTTPServerException
-    cookbook_uploaded = false
-  end
-  puts "* Uploading #{cookbook_name} (#{cookbook_uploaded ? 'new version' : 'first time'})"
-  if cookbook_uploaded
-    Chef::StreamingCookbookUploader.put("#{Chef::Config[:chef_server_url]}/cookbooks/#{cookbook_name}/_content", ENV["OPSCODE_USER"], ENV["OPSCODE_KEY"], {:file => File.new(File.join(temp_dir, tarball_name)), :name => cookbook_name})
-  else
-    Chef::StreamingCookbookUploader.post("#{Chef::Config[:chef_server_url]}/cookbooks", ENV["OPSCODE_USER"], ENV["OPSCODE_KEY"], {:file => File.new(File.join(temp_dir, tarball_name)), :name => cookbook_name})
-  end
-
-  #delete temp files (e.g. /tmp/cookbooks and /tmp/cookbooks.tgz)
-  FileUtils.rm_rf temp_dir
+  system("knife cookbook upload #{args.cookbook}")
 end
 

@@ -99,10 +99,8 @@ module Merb
             value.each_index { |i| as_hash[i] = value[i] }
             p = count
             to_send << Proc.new { append_tree(name, html, as_hash, count, p, override) }
-          when String,Symbol
-            local_html << "<td><div class='json-attr'>#{value}</div></td>"
           else
-            local_html << "<td>#{JSON.pretty_generate(value)}</td>"
+            local_html << "<td><div class='json-attr'>#{value}</div></td>"
           end
           local_html << "</tr>"
           local_html.sub!(/class='collapsed/, 'class=\'collapsed parent') if is_parent
@@ -115,12 +113,8 @@ module Merb
       end
       
       def syntax_highlight(code)
-        converter = Syntax::Convertors::HTML.for_syntax "ruby"
-        if File.exists?(code)
-          converter.convert(File.read(code), false)
-        else
-          converter.convert(code, false)
-        end
+        tokens = File.exists?(code) ? CodeRay.scan_file(code, :ruby) : CodeRay.scan(code, :ruby)
+        CodeRay.encode_tokens(tokens, :span)
       end
       
       def get_file(uri)
@@ -128,12 +122,28 @@ module Merb
         content = r.get_rest(uri)
         a = Tempfile.new("cookbook_temp_file")
         File.open(a.path, 'w'){|f| f.write(content)}
-        a.path
+        path = a.path
+        a.close
+        path
       end
       
       def str_to_bool(str)
         str =~ /true/ ? true : false
       end
+      
+      #for showing search result
+      def determine_name(type, object)
+        case type
+        when :node, :role
+          object.name
+        else
+          params[:id]
+        end
+      end 
+      
+      def get_databag_item_name(uri)
+        uri.split("/").last
+      end 
 
       # Recursively build a tree of lists.
       #def build_tree(node)

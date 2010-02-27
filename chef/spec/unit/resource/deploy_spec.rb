@@ -92,6 +92,25 @@ describe Chef::Resource::Deploy do
     @resource.scm_provider.should eql(Chef::Provider::Subversion)
   end
   
+  it "allows scm providers to be set via symbol" do
+    @resource.scm_provider.should == Chef::Provider::Git
+    @resource.scm_provider :subversion
+    @resource.scm_provider.should == Chef::Provider::Subversion
+  end
+  
+  it "allows scm providers to be set via string" do
+    @resource.scm_provider.should == Chef::Provider::Git
+    @resource.scm_provider "subversion"
+    @resource.scm_provider.should == Chef::Provider::Subversion
+  end
+
+  it "has a boolean attribute for svn_force_export defaulting to false" do
+    @resource.svn_force_export.should be_false
+    @resource.svn_force_export true
+    @resource.svn_force_export.should be_true
+    lambda {@resource.svn_force_export(10053)}.should raise_error(ArgumentError)
+  end
+  
   it "takes arbitrary environment variables in a hash" do
     @resource.environment "RAILS_ENV" => "production"
     @resource.environment.should == {"RAILS_ENV" => "production"}
@@ -194,5 +213,5 @@ describe Chef::Resource::Deploy do
     @resource.provider "revision"
     @resource.provider.should == Chef::Provider::Deploy::Revision
   end
-  
+
 end

@@ -5,13 +5,14 @@ if defined?(Merb::Plugins)
 
   dependency 'merb-slices', :immediate => true
   dependency 'chef', :immediate=>true unless defined?(Chef)
-  dependency 'nanite', :immediate=>true 
+  dependency 'bunny', :immediate=>true 
+  dependency 'uuidtools', :immediate=>true 
 
   require 'chef/role'
   require 'chef/data_bag'
   require 'chef/data_bag_item'
   require 'chef/api_client'
-  require 'chef/nanite'
+  require 'chef/webui_user'
   require 'chef/certificate'
 
   require 'mixlib/authentication'
@@ -19,7 +20,6 @@ if defined?(Merb::Plugins)
   require 'chef/data_bag'
   require 'chef/data_bag_item'
   require 'ohai'
-  require 'chef/nanite'
   require 'openssl'
 
   Merb::Plugins.add_rakefiles "chef-server-api/merbtasks", "chef-server-api/slicetasks", "chef-server-api/spectasks"
@@ -57,34 +57,28 @@ if defined?(Merb::Plugins)
 
     # Activation hook - runs after AfterAppLoads BootLoader
     def self.activate
-      Mixlib::Authentication::Log.logger = Nanite::Log.logger = Ohai::Log.logger = Chef::Log.logger 
+      Mixlib::Authentication::Log.logger = Ohai::Log.logger = Chef::Log.logger 
 
-      Thread.new do
-        until EM.reactor_running?
-          sleep 1
-        end
-        Chef::Nanite.in_event { Chef::Log.info("Nanite is ready") }
+      unless Merb::Config.environment == "test"
+        # create the couch design docs for nodes, roles, and databags
+        Chef::CouchDB.new.create_id_map
+        Chef::Node.create_design_document
+        Chef::Role.create_design_document
+        Chef::DataBag.create_design_document
+        Chef::ApiClient.create_design_document
+        Chef::WebUIUser.create_design_document
+        
+        Chef::Log.info('Loading roles')
+        Chef::Role.sync_from_disk_to_couchdb
+        
+        # Create the signing key and certificate 
+        Chef::Certificate.generate_signing_ca
 
-        unless Merb::Config.environment == "test"
-          # create the couch design docs for nodes, roles, and databags
-          Chef::CouchDB.new.create_id_map
-          Chef::Node.create_design_document
-          Chef::Role.create_design_document
-          Chef::DataBag.create_design_document
-          Chef::ApiClient.create_design_document
+        # Generate the validation key
+        Chef::Certificate.gen_validation_key
 
-          Chef::Log.info('Loading roles')
-          Chef::Role.sync_from_disk_to_couchdb
-
-          # Create the signing key and certificate 
-          Chef::Certificate.generate_signing_ca
-
-          # Generate the validation key
-          Chef::Certificate.gen_validation_key
-
-          # Generate the Web UI Key 
-          Chef::Certificate.gen_validation_key(Chef::Config[:web_ui_client_name], Chef::Config[:web_ui_key])
-        end
+        # Generate the Web UI Key 
+        Chef::Certificate.gen_validation_key(Chef::Config[:web_ui_client_name], Chef::Config[:web_ui_key])
       end
     end
 
@@ -102,10 +96,15 @@ if defined?(Merb::Plugins)
     # @note prefix your named routes with :chefserverslice_
     #   to avoid potential conflicts with global named routes.
     def self.setup_router(scope)
+      # Users
+      scope.resources :users
+      
       # Nodes
-      scope.match('/nodes/:id/cookbooks', :method => 'get').to(:controller => "nodes", :action => "cookbooks")
-      scope.resources :nodes
-
+      scope.resources :nodes, :id => /[^\/]+/
+      scope.match('/nodes/:id/cookbooks',
+                  :id => /[^\/]+/,
+                  :method => 'get').
+                  to(:controller => "nodes", :action => "cookbooks")
       # Roles
       scope.resources :roles
 
@@ -121,6 +120,7 @@ if defined?(Merb::Plugins)
 
       # Search
       scope.resources :search
+      scope.match('/search/reindex', :method => 'post').to(:controller => "search", :action => "reindex")
 
       # Cookbooks        
       scope.match('/nodes/:id/cookbooks', :method => 'get').to(:controller => "nodes", :action => "cookbooks")
@@ -132,14 +132,16 @@ if defined?(Merb::Plugins)
 
       # Data
       scope.match("/data/:data_bag_id/:id", :method => 'get').to(:controller => "data_item", :action => "show").name("data_bag_item")
-      scope.match("/data/:data_bag_id/:id", :method => 'put').to(:controller => "data_item", :action => "create").name("create_data_bag_item")
+      scope.match("/data/:data_bag_id", :method => 'post').to(:controller => "data_item", :action => "create").name("create_data_bag_item")
+      scope.match("/data/:data_bag_id/:id", :method => 'put').to(:controller => "data_item", :action => "update").name("update_data_bag_item")
       scope.match("/data/:data_bag_id/:id", :method => 'delete').to(:controller => "data_item", :action => "destroy").name("destroy_data_bag_item")
       scope.resources :data
 
       scope.match('/').to(:controller => 'main', :action =>'index').name(:top)
     end
-
   end
+  
+
   # Setup the slice layout for ChefServerApi
   #
   # Use ChefServerApi.push_path and ChefServerApi.push_app_path

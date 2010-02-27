@@ -25,7 +25,7 @@ describe Chef::Runner do
     @node.platform "mac_os_x"
     @node.platform_version "10.5.1"
     @collection = Chef::ResourceCollection.new()
-    @collection << Chef::Resource::Cat.new("loulou", @collection)
+    @collection << Chef::Resource::Cat.new("loulou1", @collection)
     Chef::Platform.set(
       :resource => :cat,
       :provider => Chef::Provider::SnakeOil
@@ -86,18 +86,32 @@ describe Chef::Runner do
   
   it "should send a resources only_if to Chef::Mixin::Command.only_if" do
     @collection[0].should_receive(:only_if).twice.and_return(true)
-    Chef::Mixin::Command.should_receive(:only_if).with(true).and_return(false)
+    Chef::Mixin::Command.should_receive(:only_if).with(true, {}).and_return(false)
+    @runner.converge
+  end
+  
+  it "should change to the directory specified in cwd for only_if" do
+    @collection[0].should_receive(:only_if).twice.and_return("/bin/true")
+    @collection[0].should_receive(:only_if_args).and_return({:cwd => "/tmp"})
+    Chef::Mixin::Command.should_receive(:only_if).with("/bin/true", {:cwd => "/tmp"}).and_return(true)
     @runner.converge
   end
   
   it "should send a resources not_if to Chef::Mixin::Command.not_if" do
     @collection[0].should_receive(:not_if).twice.and_return(true)
-    Chef::Mixin::Command.should_receive(:not_if).with(true).and_return(false)
+    Chef::Mixin::Command.should_receive(:not_if).with(true, {}).and_return(false)
     @runner.converge
   end
   
   it "should check a resources not_if, if it is provided" do
     @collection[0].should_receive(:not_if).and_return(nil)
+    @runner.converge
+  end
+  
+  it "should change to the directory specified in cwd for not_if" do
+    @collection[0].should_receive(:not_if).twice.and_return("/bin/true")
+    @collection[0].should_receive(:not_if_args).and_return({:cwd => "/tmp"})
+    Chef::Mixin::Command.should_receive(:not_if).with("/bin/true", {:cwd => "/tmp"}).and_return(true)
     @runner.converge
   end
   
@@ -155,17 +169,24 @@ describe Chef::Runner do
     @runner.converge
   end
   
-  it "should collapse delayed actions on changed resources" do
+  it "should collapse delayed actions on changed resources and execute them in the order they were encountered" do
     Chef::Platform.stub!(:find_provider_for_node).and_return(Chef::Provider::SnakeOil)
     provider = Chef::Provider::SnakeOil.new(@node, @collection[0])
-    Chef::Provider::SnakeOil.stub!(:new).and_return(provider)   
+    Chef::Provider::SnakeOil.stub!(:new).and_return(provider)
     cat = Chef::Resource::Cat.new("peanut", @collection)
     cat.notifies :buy, @collection[0], :delayed
     cat.updated = true
     @collection << cat
     @collection << cat
-    provider.should_receive(:action_buy).once.and_return(true)
+    cat2 = Chef::Resource::Cat.new("snickers", @collection)
+    cat2.notifies :pur, @collection[1], :delayed
+    cat2.notifies :pur, @collection[1], :delayed
+    cat2.updated = true
+    @collection << cat2
+    provider.should_receive(:action_buy).once.ordered
+    provider.should_receive(:action_pur).once.ordered
     @runner.converge
   end
+  
 
 end

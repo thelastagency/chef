@@ -1,5 +1,6 @@
 #
 # Author:: Joe Williams (joe@joetify.com)
+# Author:: Nuo Yan (nuo@opscode.com)
 # Copyright:: Copyright (c) 2009 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
@@ -24,11 +25,14 @@ class ChefServerWebui::Status < ChefServerWebui::Application
   before :login_required 
 
   def index
-    @status = Chef::CouchDB.new(nil, "chef_integration").get_view("nodes", "status")["rows"].inject([]) do |result, item| 
-      result << item["value"]
-      result
-    end
-    render
+    begin
+      @status = Chef::Node.list(true)
+      render
+    rescue
+      @status = {}
+      @_message = {:error => $!}
+      render
+    end 
   end
 
 end

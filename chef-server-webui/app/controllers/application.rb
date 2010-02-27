@@ -50,27 +50,56 @@ class ChefServerWebui::Application < Merb::Controller
     protocol + "://" + host + slice_url(slice_name,*args)
   end
   
-  def fix_up_node_id
-    if params.has_key?(:id)
-      params[:id].gsub!(/_/, '.')
-    end
-  end
-  
-  def escape_node_id(arg=nil)
-    unless arg
-      arg = params[:id] if params.has_key?(:id)
-    end
-    arg.gsub(/\./, '_')
-  end
-  
+  # Check if the user is logged in and if the user still exists
   def login_required
-  #  if session[:openid]
-  #    return session[:openid]
-  #  else  
-  #    self.store_location
-  #    throw(:halt, :access_denied)
-  #  end
+   if session[:user]
+     begin
+       Chef::WebUIUser.load(session[:user]) rescue (raise NotFound, "Cannot find User #{session[:user]}, maybe it got deleted by an Administrator.")
+     rescue   
+       logout_and_redirect_to_login
+     else 
+       return session[:user]
+     end 
+   else  
+     self.store_location
+     throw(:halt, :access_denied)
+   end
   end
+  
+  def cleanup_session
+    [:user,:level].each { |n| session.delete(n) }
+  end 
+  
+  def logout_and_redirect_to_login
+    cleanup_session
+    @user = Chef::WebUIUser.new
+    redirect(slice_url(:users_login), {:message => { :error => $! }, :permanent => true})
+  end 
+  
+  
+  def is_admin(name)
+    user = Chef::WebUIUser.load(name)
+    return user.admin
+  end
+  
+  #return true if there is only one admin left, false otehrwise
+  def is_last_admin
+    count = 0
+    users = Chef::WebUIUser.list
+    users.each do |u, url|
+      user = Chef::WebUIUser.load(u)
+      if user.admin
+        count = count + 1
+        return false if count == 2
+      end
+    end
+    true
+  end
+  
+  #whether or not the user should be able to edit a user's admin status
+  def edit_admin
+    is_admin(params[:user_id]) ? (!is_last_admin) : true
+  end 
   
   def authorized_node
   #  if session[:level] == :admin
@@ -92,6 +121,16 @@ class ChefServerWebui::Application < Merb::Controller
   #  end
   end
   
+  def authorized_user
+    if session[:level] == :admin
+      Chef::Log.debug("Authorized as Administrator")
+      true
+    else
+      Chef::Log.debug("Unauthorized")
+      raise Unauthorized, "The current user is not an Administrator, you can only Show and Edit the user itself. To control other users, login as an Administrator."
+    end 
+  end 
+  
   # Store the URI of the current request in the session.
   #
   # We can return to this location by calling #redirect_back_or_default.
@@ -111,7 +150,7 @@ class ChefServerWebui::Application < Merb::Controller
     case content_type
     when :html
       store_location
-      redirect slice_url(:openid_consumer), :message => { :error => "You don't have access to that, please login."}
+      redirect slice_url(:users_login), :message => { :error => "You don't have access to that, please login."}
     else
       raise Unauthorized, "You must authenticate first!"
     end
@@ -233,6 +272,10 @@ class ChefServerWebui::Application < Merb::Controller
       end
     end
     result
+  end
+  
+  def convert_newline_to_br(string)
+    string.to_s.gsub(/\n/, '<br />') unless string.nil?
   end
 
 end

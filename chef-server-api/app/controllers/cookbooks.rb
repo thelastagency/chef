@@ -1,7 +1,8 @@
 #
 # Author:: Adam Jacob (<adam@opscode.com>)
 # Author:: Christopher Brown (<cb@opscode.com>)
-# Copyright:: Copyright (c) 2008 Opscode, Inc.
+# Author:: Christopher Walters (<cw@opscode.com>)
+# Copyright:: Copyright (c) 2008, 2009 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,6 +28,7 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
   before :authenticate_every
 
   include Chef::Mixin::Checksum
+  include Merb::ChefServerApi::TarballHelper
   
   def index
     cl = Chef::CookbookLoader.new
@@ -42,7 +44,7 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
     begin
       cookbook = cl[params[:id]]
     rescue ArgumentError => e
-      raise NotFound, "Cannot find a cookbook named #{cookbook.to_s}"
+      raise NotFound, "Cannot find a cookbook named #{params[:id]}"
     end
     results = load_cookbook_files(cookbook)
     results[:name] = cookbook.name.to_s
@@ -50,7 +52,7 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
     display results 
   end
  
-  def show_segment 
+  def show_segment
     cl = Chef::CookbookLoader.new
     begin
       cookbook = cl[params[:cookbook_id]]
@@ -63,7 +65,11 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
     if params[:id]
       case params[:segment]
       when "templates","files"
-        serve_segment_preferred(cookbook, params[:segment], cookbook_files[params[:segment].to_sym])
+        if params[:recursive]
+          serve_directory_preferred(cookbook, params[:segment], cookbook_files[params[:segment].to_sym])
+        else
+          serve_segment_preferred(cookbook, params[:segment], cookbook_files[params[:segment].to_sym])
+        end
       else
         serve_segment_file(cookbook, params[:segment], cookbook_files[params[:segment].to_sym])
       end
@@ -75,21 +81,19 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
   def serve_segment_preferred(cookbook, segment, files)
 
     to_send = nil
-
-    preferences = [
-      "host-#{params[:fqdn]}",
-      "#{params[:platform]}-#{params[:version]}",
-      "#{params[:platform]}",
-      "default"
-    ]
-
+    
     preferences.each do |pref|
       unless to_send
-        to_send = files.detect { |file| Chef::Log.debug("#{pref.inspect} #{file.inspect}"); file[:name] == params[:id] && file[:specificity] == pref }
+        Chef::Log.debug("Looking for a file with name `#{params[:id]}' and specificity #{pref}")
+        to_send = files.detect do |file| 
+          Chef::Log.debug("#{pref.inspect} #{file.inspect}")
+          file[:name] == params[:id] && file[:specificity] == pref
+          
+        end
       end
     end
 
-    raise NotFound, "Cannot find a suitable #{segment} file!" unless to_send 
+    raise NotFound, "Cannot find a suitable #{segment} file for #{params[:id]}!" unless to_send 
     current_checksum = to_send[:checksum] 
     Chef::Log.debug("#{to_send[:name]} Client Checksum: #{params[:checksum]}, Server Checksum: #{current_checksum}") 
     if current_checksum == params[:checksum]
@@ -105,6 +109,25 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
       raise NotFound, "Cannot find the real file for #{to_send[:specificity]} #{to_send[:name]} - this is a 42 error (shouldn't ever happen)" unless file_name
       send_file(file_name)
     end
+  end
+  
+  def serve_directory_preferred(cookbook, segment, files)
+    preferred_dir_contents = []
+    preferences.each do |preference|
+      preferred_dir_contents = files.select { |file| file[:name] =~ /^#{params[:id]}/ && file[:specificity] == preference  }
+      break unless preferred_dir_contents.empty?
+    end
+    
+    raise NotFound, "Cannot find a suitable directory for #{params[:id]}" if preferred_dir_contents.empty?
+    
+    display preferred_dir_contents.map { |file| file[:name].sub(/^#{params[:id]}/, '') }
+  end
+  
+  def preferences
+    ["host-#{params[:fqdn]}",
+    "#{params[:platform]}-#{params[:version]}",
+    "#{params[:platform]}",
+    "default"]
   end
 
   def serve_segment_file(cookbook, segment, files)
@@ -123,6 +146,67 @@ class ChefServerApi::Cookbooks < ChefServerApi::Application
       raise NotFound, "Cannot find the real file for #{to_send[:name]} - this is a 42 error (shouldn't ever happen)" unless file_name
       send_file(file_name)
     end
+  end
+  
+  def create
+    # validate name and file parameters and throw an error if a cookbook with the same name already exists
+    raise BadRequest, "missing required parameter: name" unless params[:name]
+    desired_name = params[:name]
+    raise BadRequest, "invalid parameter: name must be at least one character long and contain only letters, numbers, periods (.), underscores (_), and hyphens (-)" unless desired_name =~ /\A[\w.-]+\Z/
+    begin
+      validate_file_parameter(desired_name, params[:file])
+    rescue FileParameterException => te
+      raise BadRequest, te.message
+    end
+    
+    begin
+      Chef::CookbookLoader.new[desired_name]
+      raise BadRequest, "Cookbook with the name #{desired_name} already exists"
+    rescue ArgumentError
+    end
+    
+    expand_tarball_and_put_in_repository(desired_name, params[:file][:tempfile])
+    
+    # construct successful response
+    self.status = 201
+    location = absolute_slice_url(:cookbook, :id => desired_name)
+    headers['Location'] = location
+    result = { 'uri' => location }
+    display result
+  end
+  
+  def get_tarball
+    cookbook_name = params[:cookbook_id]
+    expected_location = cookbook_location(cookbook_name)
+    raise NotFound, "Cannot find cookbook named #{cookbook_name} at #{expected_location}. Note: Tarball generation only applies to cookbooks under the first directory in the server's Chef::Config.cookbook_path variable and does to apply overrides." unless File.directory? expected_location
+    
+    send_file(get_or_create_cookbook_tarball_location(cookbook_name))
+  end
+  
+  def update
+    cookbook_name = params[:cookbook_id]
+    cookbook_path = cookbook_location(cookbook_name)
+    raise NotFound, "Cannot find cookbook named #{cookbook_name}" unless File.directory? cookbook_path
+    begin
+      validate_file_parameter(cookbook_name, params[:file])
+    rescue FileParameterException => te
+      raise BadRequest, te.message
+    end
+    
+    expand_tarball_and_put_in_repository(cookbook_name, params[:file][:tempfile])
+    
+    display Hash.new
+  end
+  
+  def destroy
+    cookbook_name = params[:id]
+    cookbook_path = cookbook_location(cookbook_name)
+    raise NotFound, "Cannot find cookbook named #{cookbook_name}" unless File.directory? cookbook_path
+
+    FileUtils.rm_rf(cookbook_path)
+    FileUtils.rm_f(cookbook_tarball_location(cookbook_name))
+
+    display Hash.new
   end
   
 end

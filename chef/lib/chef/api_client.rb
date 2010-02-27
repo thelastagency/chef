@@ -21,6 +21,7 @@ require 'chef/config'
 require 'chef/mixin/params_validate'
 require 'chef/couchdb'
 require 'chef/certificate'
+require 'chef/index_queue'
 require 'extlib'
 require 'json'
 
@@ -29,6 +30,8 @@ class Chef
     
     include Chef::Mixin::FromFile
     include Chef::Mixin::ParamsValidate
+    include Chef::IndexQueue::Indexable
+    
     
     DESIGN_DOCUMENT = {
       "version" => 1,
@@ -55,17 +58,17 @@ class Chef
       }
     }
 
-    attr_accessor :couchdb_rev, :couchdb_id
+    attr_accessor :couchdb_rev, :couchdb_id, :couchdb
     
     # Create a new Chef::ApiClient object.
-    def initialize
+    def initialize(couchdb=nil)
       @name = '' 
       @public_key = nil
       @private_key = nil
       @couchdb_rev = nil
       @couchdb_id = nil
       @admin = false
-      @couchdb = Chef::CouchDB.new 
+      @couchdb = couchdb ? couchdb : Chef::CouchDB.new
     end
 
     # Gets or sets the client name.
@@ -104,7 +107,7 @@ class Chef
       )
     end
 
-    # Gets or sets the public key.
+    # Gets or sets the private key.
     # 
     # @params [Optional String] The string representation of the private key.
     # @return [String] The current value.
@@ -162,8 +165,8 @@ class Chef
     
     # List all the Chef::ApiClient objects in the CouchDB.  If inflate is set
     # to true, you will get the full list of all ApiClients, fully inflated.
-    def self.cdb_list(inflate=false)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_list(inflate=false, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       rs = couchdb.list("clients", inflate)
       if inflate
         rs["rows"].collect { |r| r["value"] }
@@ -189,15 +192,22 @@ class Chef
     # 
     # @params [String] The name of the client to load
     # @return [Chef::ApiClient] The resulting Chef::ApiClient object
-    def self.cdb_load(name)
-      couchdb = Chef::CouchDB.new
+    def self.cdb_load(name, couchdb=nil)
+      couchdb = couchdb ? couchdb : Chef::CouchDB.new
       couchdb.load("client", name)
     end
     
     # Load a client by name via the API
     def self.load(name)
       r = Chef::REST.new(Chef::Config[:chef_server_url])
-      r.get_rest("clients/#{name}")
+      response = r.get_rest("clients/#{name}")
+      if response.kind_of?(Chef::ApiClient)
+        response
+      else
+        client = Chef::ApiClient.new
+        client.name(response['clientname'])
+        client
+      end
     end
     
     # Remove this client from the CouchDB
@@ -221,18 +231,24 @@ class Chef
     end
     
     # Save this client via the REST API, returns a hash including the private key
-    def save
-      r = Chef::REST.new(Chef::Config[:chef_server_url])
-      res = begin
-              r.put_rest("clients/#{@name}", self)
-            rescue Net::HTTPServerException => e
-              if e.response.code == "404"
-                r.post_rest("clients", self)
-              else
-                raise e
-              end
-            end
-    end
+    def save(new_key=false, validation=false)
+      if validation
+        r = Chef::REST.new(Chef::Config[:chef_server_url], Chef::Config[:validation_client_name], Chef::Config[:validation_key])
+      else
+        r = Chef::REST.new(Chef::Config[:chef_server_url])
+      end
+      # First, try and create a new registration
+      begin
+        r.post_rest("clients", {:name => self.name, :admin => self.admin })
+      rescue Net::HTTPServerException => e
+        # If that fails, go ahead and try and update it
+        if e.response.code == "403"
+          r.put_rest("clients/#{name}", { :name => self.name, :admin => self.admin, :private_key => new_key }) 
+        else
+          raise e
+        end
+      end
+    end 
     
     # Create the client via the REST API
     def create
@@ -241,8 +257,8 @@ class Chef
     end
     
     # Set up our CouchDB design document
-    def self.create_design_document
-      couchdb = Chef::CouchDB.new
+    def self.create_design_document(couchdb=nil)
+      couchdb ||= Chef::CouchDB.new
       couchdb.create_design_document("clients", DESIGN_DOCUMENT)
     end
     

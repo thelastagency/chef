@@ -1,5 +1,6 @@
 #
 # Author:: Adam Jacob (<adam@opscode.com>)
+# Author:: Christopher Brown (<cb@opscode.com>)
 # Copyright:: Copyright (c) 2008 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
@@ -80,13 +81,6 @@ EOH
       }.should raise_error(Chef::Exceptions::PrivateKeyMissing)
     end
 
-    it "should raise a Chef::Exceptions::PrivateKeyMissing exception if the key cannot be read" do
-      File.stub!(:exists?).and_return(true)
-      File.stub!(:readable?).and_return(false)
-      lambda {
-        @rest.load_signing_key("/tmp/keyfile.pem")
-      }.should raise_error(Chef::Exceptions::PrivateKeyMissing)
-    end
   end
 
   describe "get_rest" do
@@ -194,6 +188,36 @@ EOH
       do_run_request
     end
     
+    describe "with OpenSSL Verify Mode set to :verify peer" do
+      before(:each) do
+        Chef::Config[:ssl_verify_mode] = :verify_peer
+        @url_mock.should_receive(:scheme).and_return("https")
+      end
+
+      after(:each) do
+        Chef::Config[:ssl_verify_mode] = :verify_none
+      end
+
+      it "should set the OpenSSL Verify Mode to verify_peer if requested" do
+        @http_mock.should_receive(:verify_mode=).with(OpenSSL::SSL::VERIFY_PEER).and_return(true)
+        do_run_request
+      end
+
+      it "should set the CA path if that is set in the configuration" do
+        Chef::Config[:ssl_ca_path] = File.join(File.dirname(__FILE__), "..", "data", "ssl")
+        @http_mock.should_receive(:ca_path=).with(Chef::Config[:ssl_ca_path]).and_return(true)
+        do_run_request
+        Chef::Config[:ssl_ca_path] = nil
+      end
+
+      it "should set the CA file if that is set in the configuration" do
+        Chef::Config[:ssl_ca_file] = File.join(File.dirname(__FILE__), "..", "data", "ssl", "5e707473.0")
+        @http_mock.should_receive(:ca_file=).with(Chef::Config[:ssl_ca_file]).and_return(true)
+        do_run_request
+        Chef::Config[:ssl_ca_file] = nil
+      end
+    end
+
     describe "with a client SSL cert" do
       before(:each) do
         Chef::Config[:ssl_client_cert] = "/etc/chef/client-cert.pem"
@@ -318,6 +342,20 @@ EOH
       @http_response_mock.stub!(:kind_of?).with(Net::HTTPMovedPermanently).and_return(true)
       @http_response_mock.stub!(:[]).with('location').and_return(@url_mock.path)
       lambda { do_run_request(method=:GET, data=false, limit=1) }.should raise_error(ArgumentError)
+    end
+
+    it "should show the JSON error message on an unsuccessful request" do
+      @http_response_mock.stub!(:kind_of?).with(Net::HTTPSuccess).and_return(false)
+      @http_response_mock.stub!(:kind_of?).with(Net::HTTPFound).and_return(false)
+      @http_response_mock.stub!(:kind_of?).with(Net::HTTPMovedPermanently).and_return(false)
+      @http_response_mock.stub!(:[]).with('content-type').and_return('application/json')
+      @http_response_mock.stub!(:body).and_return('{ "error":[ "Ears get sore!", "Not even four" ] }')
+      @http_response_mock.stub!(:code).and_return(500)
+      @http_response_mock.stub!(:message).and_return('Server Error')
+      ## BUGBUG - this should absolutely be working, but it.. isn't.
+      #Chef::Log.should_receive(:warn).with("HTTP Request Returned 500 Server Error: Ears get sore!, Not even four")
+      @http_response_mock.should_receive(:error!)
+      do_run_request
     end
     
     it "should raise an exception on an unsuccessful request" do

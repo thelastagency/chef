@@ -28,7 +28,7 @@ require "merb-core"
 
 [ 'chef', 'chef-server-api' ].each do |lib|
   $:.unshift(File.expand_path(File.join(File.dirname(__FILE__), "..", "..", "lib")))
-  library = File.join(File.dirname(__FILE__), "..", "..", lib, "lib", "#{lib}.rb")
+  library = File.expand_path(File.join(File.dirname(__FILE__), "..", "..", lib, "lib", "#{lib}.rb"))
   require library if File.exists?(library)
 end
 
@@ -66,5 +66,8 @@ else
     File.join("/etc", "chef", "server.rb")
   )
 end
+
+Chef::Log.init(Chef::Config[:log_location]) 
+Chef::Log.level = Chef::Config[:log_level]
 
 Merb.start

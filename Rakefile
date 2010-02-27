@@ -4,8 +4,10 @@ require 'cucumber/rake/task'
 
 desc "Build the chef gems"
 task :gem do
+  build_commands = Hash.new("rake package")
+  build_commands['chef-solr'] = 'rake build'
   gems.each do |dir|
-    Dir.chdir(dir) { sh "rake package" }
+      Dir.chdir(dir) { sh build_commands[dir] }
   end
 end
  
@@ -55,23 +57,17 @@ def configure_rabbitmq(type="normal")
   # hack. wait for rabbit to come up.
   sleep 2
   
-  puts `rabbitmqctl add_vhost /nanite`
+  puts `rabbitmqctl add_vhost /chef`
 
-  # create 'mapper' and 'nanite' users, give them each the password 'testing'
-  %w[mapper nanite].each do |agent|
-    puts `rabbitmqctl add_user #{agent} testing`
-  end
+  # create 'chef' user, give it the password 'testing'
+  puts `rabbitmqctl add_user chef testing`
 
-  # grant the mapper user the ability to do anything with the /nanite vhost
-  # the three regex's map to config, write, read permissions respectively
-  puts `rabbitmqctl set_permissions -p /nanite mapper ".*" ".*" ".*"`
-
-  # grant the nanite user more limited permissions on the /nanite vhost
-  puts `rabbitmqctl set_permissions -p /nanite nanite ".*" ".*" ".*"`
+  # the three regexes map to config, write, read permissions respectively
+  puts `rabbitmqctl set_permissions -p /chef chef ".*" ".*" ".*"`
 
   puts `rabbitmqctl list_users`
   puts `rabbitmqctl list_vhosts`
-  puts `rabbitmqctl list_permissions -p /nanite`
+  puts `rabbitmqctl list_permissions -p /chef`
   
 end
 
@@ -106,6 +102,7 @@ def start_chef_solr_indexer(type="normal")
 end
 
 def start_chef_server(type="normal")
+  puts "Starting #{type} chef development server"
   @chef_server_pid     = nil
   mcid = fork
   if mcid # parent
@@ -113,8 +110,10 @@ def start_chef_server(type="normal")
   else # child
     case type
     when "normal"
+      puts "Starting chef server for development with './chef-server/bin/chef-server -a thin -l debug -N'"
       exec("./chef-server/bin/chef-server -a thin -l debug -N")
     when "features"
+      puts "Starting chef server for features with #{["./chef-server/bin/chef-server -a thin -C #{File.join(File.dirname(__FILE__), "features", "data", "config", "server.rb")} -l debug -N"].join(' ')}"
       exec("./chef-server/bin/chef-server -a thin -C #{File.join(File.dirname(__FILE__), "features", "data", "config", "server.rb")} -l debug -N")
     end
   end
@@ -182,7 +181,7 @@ namespace :dev do
     start_dev_environment("features")
     wait_for_ctrlc
   end
-
+  
   namespace :features do
     
     namespace :start do
@@ -230,6 +229,7 @@ namespace :dev do
     desc "Start RabbitMQ"
     task :rabbitmq do
       start_rabbitmq
+      configure_rabbitmq
       wait_for_ctrlc
     end
 
@@ -288,6 +288,10 @@ namespace :features do
       Cucumber::Rake::Task.new(:cookbooks) do |t|
         t.profile = "api_cookbooks"
       end
+
+      Cucumber::Rake::Task.new(:cookbook_tarballs) do |t|
+        t.profile = "api_cookbooks_tarballs"
+      end
     end
     
     namespace :data do    
@@ -320,6 +324,10 @@ namespace :features do
       Cucumber::Rake::Task.new(:show) do |t|
         t.profile = "api_search_show"
       end
+      desc "Run cucumber tests for searching via the REST API"
+      Cucumber::Rake::Task.new(:reindex) do |t|
+        t.profile = "api_search_reindex"
+      end
     end
   end
 
@@ -336,11 +344,23 @@ namespace :features do
     Cucumber::Rake::Task.new(:run_interval) do |t|
       t.profile = "client_run_interval"
     end
+
+    Cucumber::Rake::Task.new(:cookbook_sync) do |t|
+      t.profile = "client_cookbook_sync"
+    end
   end
 
   desc "Run cucumber tests for the cookbooks"
   Cucumber::Rake::Task.new(:cookbooks) do |t|
     t.profile = "cookbooks"
+  end
+
+  namespace :cookbook do
+
+    desc "Run cucumber tests for the cookbook metadata"
+    Cucumber::Rake::Task.new(:metadata) do |t|
+      t.profile = "cookbook_metadata"
+    end
   end
 
   desc "Run cucumber tests for the recipe language"
@@ -360,6 +380,9 @@ namespace :features do
   namespace :language do
     Cucumber::Rake::Task.new(:recipe_include) do |t|
       t.profile = "recipe_inclusion"
+    end
+    Cucumber::Rake::Task.new(:attribute_include) do |t|
+      t.profile = "attribute_inclusion"
     end
   end
   
@@ -402,6 +425,10 @@ namespace :features do
     desc "Run cucumber tests for template resources"
     Cucumber::Rake::Task.new(:template) do |t|
       t.profile = "provider_template"
+    end
+    
+    Cucumber::Rake::Task.new(:remote_directory) do |t|
+      t.profile = "provider_remote_directory"
     end
     
     Cucumber::Rake::Task.new(:git) do |t|

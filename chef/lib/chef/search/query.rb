@@ -43,7 +43,7 @@ class Chef
 
         response = @rest.get_rest("search/#{type}?q=#{escape(query)}&sort=#{escape(sort)}&start=#{escape(start)}&rows=#{escape(rows)}")
         if block
-          response["rows"].each { |o| block.call(o) }
+          response["rows"].each { |o| block.call(o) unless o.nil?}
           unless (response["start"] + response["rows"].length) >= response["total"]
             nstart = response["start"] + rows
             search(type, query, sort, nstart, rows, &block)
@@ -53,6 +53,10 @@ class Chef
           [ response["rows"], response["start"], response["total"] ]
         end
       end
+      
+      def list_indexes
+        response = @rest.get_rest("search")
+      end 
 
       private
         def escape(s)
