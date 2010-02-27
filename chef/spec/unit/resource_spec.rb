@@ -283,5 +283,4 @@ describe Chef::Resource do
       @resource.run_action("install")
     end
   end
-
 end
