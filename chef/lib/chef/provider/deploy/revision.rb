@@ -27,6 +27,13 @@ class Chef
         
         protected
         
+        def prepare_rollback
+          rp_index = all_releases.index(release_path)
+          raise RuntimeError, "There is no release to rollback to!" unless rp_index
+          rp_index += 1
+          all_releases[rp_index..-1]
+        end
+        
         def release_created(release)
           sorted_releases {|r| r.delete(release); r << release }
         end

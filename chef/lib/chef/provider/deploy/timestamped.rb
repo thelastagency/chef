@@ -23,6 +23,12 @@ class Chef
         
         protected
         
+        def prepare_rollback
+          @release_path = all_releases[-2] 
+          raise RuntimeError, "There is no release to rollback to!" unless @release_path
+          [ all_releases.last ]
+        end
+        
         def release_slug
           Time.now.utc.strftime("%Y%m%d%H%M%S")
         end
