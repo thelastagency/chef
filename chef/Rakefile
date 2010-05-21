@@ -4,7 +4,7 @@ require 'rake/rdoctask'
 require './tasks/rspec.rb'
 
 GEM = "naked-chef"
-CHEF_VERSION = "0.8.0"
+CHEF_VERSION = "0.8.1"
 AUTHOR = "Peritor GmbH"
 EMAIL = "scalarium@peritor.com"
 HOMEPAGE = "http://wiki.opscode.com/display/chef"
