@@ -252,6 +252,17 @@ describe Chef::Resource do
     end
   end
   
+  describe "retry" do
+    it "should default to 0 retries" do
+      @resource.retries.should == 0
+    end
+    
+    it "should allow to specify the number of retries for an action" do
+      @resource.retries(1)
+      @resource.retries.should == 1
+    end
+  end
+  
   describe "run_action" do
     before(:each) do
       @provider = stub("provider", :action_install => true, :load_current_resource => true)
@@ -297,6 +308,4 @@ describe Chef::Resource do
       @resource.run_action("install")
     end
   end
-  
-
 end
