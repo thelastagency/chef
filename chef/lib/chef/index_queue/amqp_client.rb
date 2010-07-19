@@ -68,17 +68,24 @@ class Chef
       end
       
       def disconnected!
+        Chef::Log.error("Disconnected from the AMQP Broker (RabbitMQ)")
         @amqp_client = nil
         reset!
       end
 
       def send_action(action, data)
+        retries = 0
         begin
           exchange.publish({"action" => action.to_s, "payload" => data}.to_json)
-        rescue Bunny::ServerDownError, Bunny::ConnectionError, Errno::ECONNRESET => e
-          Chef::Log.error("Disconnected from the AMQP Broker, cannot queue data to the indexer")
+        rescue Bunny::ServerDownError, Bunny::ConnectionError, Errno::ECONNRESET
           disconnected!
-          raise e
+          if (retries += 1) < 2
+            Chef::Log.info("Attempting to reconnect to the AMQP broker")
+            retry
+          else
+            Chef::Log.fatal("Could not re-connect to the AMQP broker, giving up")
+            raise
+          end
         end
       end
 

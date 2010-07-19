@@ -24,15 +24,23 @@ class Chef
   class Knife
     class ClientShow < Knife
 
-      banner "Sub-Command: client show CLIENT (options)"
+      banner "knife client show CLIENT (options)"
 
       option :attribute,
         :short => "-a ATTR",
         :long => "--attribute ATTR",
         :description => "Show only one attribute"
 
-      def run 
-        client = Chef::ApiClient.load(@name_args[0])
+      def run
+        @client_name = @name_args[0]
+
+        if @client_name.nil?
+          show_usage
+          Chef::Log.fatal("You must specify a client name")
+          exit 1
+        end
+        
+        client = Chef::ApiClient.load(@client_name)
         output(format_for_display(client))
       end
 

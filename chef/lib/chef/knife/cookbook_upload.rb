@@ -20,10 +20,11 @@
 require 'rest_client'
 
 require 'chef/knife'
-require 'chef/streaming_cookbook_uploader'
+require 'chef/cookbook_loader'
 require 'chef/cache/checksum'
 require 'chef/sandbox'
 require 'chef/cookbook_version'
+require 'chef/cookbook/syntax_check'
 require 'chef/cookbook/file_system_file_vendor'
 
 class Chef
@@ -31,7 +32,7 @@ class Chef
     class CookbookUpload < Knife
       include Chef::Mixin::ShellOut
 
-      banner "Sub-Command: cookbook upload [COOKBOOKS...] (options)"
+      banner "knife cookbook upload [COOKBOOKS...] (options)"
 
       option :cookbook_path,
         :short => "-o PATH:PATH",
@@ -50,6 +51,8 @@ class Chef
         else
           config[:cookbook_path] = Chef::Config[:cookbook_path]
         end
+        # Ugh, manipulating globals causes bugs.
+        @user_cookbook_path = config[:cookbook_path]
 
         Chef::Cookbook::FileVendor.on_create { |manifest| Chef::Cookbook::FileSystemFileVendor.new(manifest) }
 
@@ -60,6 +63,11 @@ class Chef
             upload_cookbook(cookbook)
           end
         else
+          if @name_args.length < 1
+            show_usage
+            Chef::Log.fatal("You must specify the --all flag or at least one cookbook name")
+            exit 1
+          end
           @name_args.each do |cookbook_name|
             if cl.cookbook_exists?(cookbook_name)
               upload_cookbook(cl[cookbook_name])
@@ -70,23 +78,12 @@ class Chef
         end
       end
       
-      def test_ruby(cookbook_dir)
-        Chef::Log.info("Validating ruby files")
-        Dir[File.join(cookbook_dir, '**', '*.rb')].each do |ruby_file|
-          test_ruby_file(cookbook_dir, ruby_file)
-        end
-      end
-      
-      def test_templates(cookbook_dir)
-        Chef::Log.info("Validating templates")
-        Dir[File.join(cookbook_dir, '**', '*.erb')].each do |erb_file|
-          test_template_file(cookbook_dir, erb_file)
-        end
-      end
-      
       def upload_cookbook(cookbook)
         Chef::Log.info("Saving #{cookbook.name}")
         
+        # Validate the cookbook before staging it or else the syntax checker's
+        # cache will not be helpful.
+        validate_cookbook(cookbook)
         # create build directory
         tmp_cookbook_dir = create_build_dir(cookbook)
 
@@ -106,11 +103,12 @@ class Chef
         checksum_files = build_dir_cookbook.checksums
         checksums = checksum_files.inject({}){|memo,elt| memo[elt.first]=nil ; memo}
         new_sandbox = catch_auth_exceptions{ rest.post_rest("/sandboxes", { :checksums => checksums }) }
-        
+     
+        Chef::Log.info("Uploading files")
         # upload the new checksums and commit the sandbox
         new_sandbox['checksums'].each do |checksum, info|
           if info['needs_upload'] == true
-            Chef::Log.debug("PUTting #{checksum_files[checksum]} (checksum hex = #{checksum}) to #{info['url']}")
+            Chef::Log.info("Uploading #{checksum_files[checksum]} (checksum hex = #{checksum}) to #{info['url']}")
             
             # Checksum is the hexadecimal representation of the md5,
             # but we need the base64 encoding for the content-md5
@@ -134,11 +132,25 @@ class Chef
               Chef::Log.error("Upload failed: #{e.message}\n#{e.response.body}")
               raise
             end
+          else
+            Chef::Log.debug("#{checksum_files[checksum]} has not changed")
           end
         end
         sandbox_url = new_sandbox['uri']
         Chef::Log.debug("Committing sandbox")
-        catch_auth_exceptions{ rest.put_rest(sandbox_url, {:is_completed => true}) }
+        # Retry if S3 is claims a checksum doesn't exist (the eventual
+        # in eventual consistency)
+        retries = 0
+        begin
+          catch_auth_exceptions{ rest.put_rest(sandbox_url, {:is_completed => true}) }
+        rescue Net::HTTPServerException => e
+          if e.message =~ /^400/ && (retries += 1) <= 5
+            sleep 2
+            retry
+          else
+            raise
+          end
+        end
 
         # files are uploaded, so save the manifest
         catch_auth_exceptions{ build_dir_cookbook.save }
@@ -165,20 +177,19 @@ class Chef
             on_disk_path = checksums_to_on_disk_paths[manifest_record[:checksum]]
             dest = File.join(tmp_cookbook_dir, cookbook.name.to_s, path_in_cookbook)
             FileUtils.mkdir_p(File.dirname(dest))
+            Chef::Log.debug("Staging #{on_disk_path} to #{dest}")
             FileUtils.cp(on_disk_path, dest)
           end
         end
         
-        # Validate ruby files and templates
-        test_ruby(tmp_cookbook_dir)
-        test_templates(tmp_cookbook_dir)
-
         # First, generate metadata
         Chef::Log.debug("Generating metadata")
         kcm = Chef::Knife::CookbookMetadata.new
         kcm.config[:cookbook_path] = [ tmp_cookbook_dir ]
         kcm.name_args = [ cookbook.name.to_s ]
         kcm.run
+
+        tmp_cookbook_dir
       end
 
       def catch_auth_exceptions
@@ -189,34 +200,22 @@ class Chef
           when "401"
             Chef::Log.fatal "Request failed due to authentication (#{e}), check your client configuration (username, key)"
             exit 18
+          else 
+            raise
           end
         end
       end
 
-      private
-
-      def test_template_file(cookbook_dir, erb_file)
-        Chef::Log.debug("Testing template #{erb_file} for syntax errors...")
-        result = shell_out("sh -c 'erubis -x #{erb_file} | ruby -c'")
-        result.error!
-      rescue Chef::Exceptions::ShellCommandFailed
-        file_relative_path = erb_file[/^#{Regexp.escape(cookbook_dir)}#{File::Separator}(.*)/, 1]
-        Chef::Log.fatal("Erb template #{file_relative_path} has a syntax error:")
-        result.stderr.each_line { |l| Chef::Log.fatal(l.chomp) }
-        exit
+      def validate_cookbook(cookbook)
+        syntax_checker = Chef::Cookbook::SyntaxCheck.for_cookbook(cookbook.name, @user_cookbook_path)
+        Chef::Log.info("Validating ruby files")
+        exit(1) unless syntax_checker.validate_ruby_files
+        Chef::Log.info("Validating templates")
+        exit(1) unless syntax_checker.validate_templates
+        Chef::Log.info("Syntax OK")
+        true
       end
 
-      def test_ruby_file(cookbook_dir, ruby_file)
-        Chef::Log.debug("Testing #{ruby_file} for syntax errors...")
-        result = shell_out("ruby -c #{ruby_file}")
-        result.error!
-      rescue Chef::Exceptions::ShellCommandFailed
-        file_relative_path = ruby_file[/^#{Regexp.escape(cookbook_dir)}#{File::Separator}(.*)/, 1]
-        Chef::Log.fatal("Cookbook file #{file_relative_path} has a syntax error:")
-        result.stderr.each_line { |l| Chef::Log.fatal(l.chomp) }
-        exit
-      end
-      
     end
   end
 end

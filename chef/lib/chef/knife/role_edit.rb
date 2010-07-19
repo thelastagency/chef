@@ -24,10 +24,18 @@ class Chef
   class Knife
     class RoleEdit < Knife
 
-      banner "Sub-Command: role edit ROLE (options)"
+      banner "knife role edit ROLE (options)"
 
       def run 
-        edit_object(Chef::Role, @name_args[0])
+        @role_name = @name_args[0]
+
+        if @role_name.nil?
+          show_usage
+          Chef::Log.fatal("You must specify a role name")
+          exit 1
+        end
+        
+        edit_object(Chef::Role, @role_name)
       end
     end
   end

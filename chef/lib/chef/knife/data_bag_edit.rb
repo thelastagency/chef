@@ -23,7 +23,8 @@ class Chef
   class Knife
     class DataBagEdit < Knife
 
-      banner "Sub-Command: data bag edit BAG ITEM (options)"
+      banner "knife data bag edit BAG ITEM (options)"
+      category "data bag"
 
       def run 
         if @name_args.length != 2

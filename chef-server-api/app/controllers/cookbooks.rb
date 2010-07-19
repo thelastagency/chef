@@ -48,7 +48,7 @@ class Cookbooks < Application
     display response
   end
 
-  #FIXME: this is different from the rest of our API, but in a useful way...
+  #FIXME: this is different from the rest of the API, but in a useful way...
   def index_latest
     cookbook_list = Chef::CookbookVersion.cdb_list_latest(true)
     response = Hash.new
@@ -59,10 +59,10 @@ class Cookbooks < Application
     display response
   end
 
-  def index_recipes #FIXME: is this cool to do w/ access control on platform?
+  def index_recipes
     all_cookbooks = Array(Chef::CookbookVersion.cdb_list_latest(true))
     all_cookbooks.map! do |cookbook|
-      cookbook.manifest["recipes"].map { |r| "#{cookbook.name}::#{r['name']}" }
+      cookbook.manifest["recipes"].map { |r| "#{cookbook.name}::#{File.basename(r['name'], ".rb")}" }
     end
     all_cookbooks.flatten!
     all_cookbooks.sort!
@@ -146,10 +146,14 @@ class Cookbooks < Application
   private
 
   def get_cookbook_version(name, version)
-    begin
-      Chef::CookbookVersion.cdb_load(name, version)
-    rescue Chef::Exceptions::CouchDBNotFound => e
+    Chef::CookbookVersion.cdb_load(name, version)
+  rescue Chef::Exceptions::CouchDBNotFound => e
+    raise NotFound, "Cannot find a cookbook named #{name} with version #{version}"
+  rescue Net::HTTPServerException => e
+    if e.to_s =~ /^404/
       raise NotFound, "Cannot find a cookbook named #{name} with version #{version}"
+    else
+      raise
     end
   end
   

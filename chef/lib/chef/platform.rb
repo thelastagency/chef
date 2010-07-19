@@ -80,14 +80,6 @@ class Chef
               :mdadm => Chef::Provider::Mdadm
             }
           },
-          :scientific => {
-            :default => {
-              :service => Chef::Provider::Service::Redhat,
-              :cron => Chef::Provider::Cron,
-              :package => Chef::Provider::Package::Yum,
-              :mdadm => Chef::Provider::Mdadm
-            }
-          },
           :fedora   => {
             :default => {
               :service => Chef::Provider::Service::Redhat,
@@ -132,7 +124,8 @@ class Chef
               :env =>  Chef::Provider::Env::Windows,
               :service => Chef::Provider::Service::Windows,
               :user => Chef::Provider::User::Windows,
-              :group => Chef::Provider::Group::Windows
+              :group => Chef::Provider::Group::Windows,
+              :mount => Chef::Provider::Mount::Windows
             }
           },
           :mingw32 => {
@@ -140,7 +133,8 @@ class Chef
               :env =>  Chef::Provider::Env::Windows,
               :service => Chef::Provider::Service::Windows,
               :user => Chef::Provider::User::Windows,
-              :group => Chef::Provider::Group::Windows
+              :group => Chef::Provider::Group::Windows,
+              :mount => Chef::Provider::Mount::Windows
             }
           },
           :windows => {
@@ -148,13 +142,16 @@ class Chef
               :env =>  Chef::Provider::Env::Windows,
               :service => Chef::Provider::Service::Windows,
               :user => Chef::Provider::User::Windows,
-              :group => Chef::Provider::Group::Windows
+              :group => Chef::Provider::Group::Windows,
+              :mount => Chef::Provider::Mount::Windows
             }
           },
           :solaris  => {},
           :solaris2 => {
             :default => {
-              :service => Chef::Provider::Service::Solaris
+              :service => Chef::Provider::Service::Solaris,
+        			:package => Chef::Provider::Package::Solaris,
+        			:cron => Chef::Provider::Cron
             }
           },
           :default  => {

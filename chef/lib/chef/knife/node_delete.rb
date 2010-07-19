@@ -24,10 +24,18 @@ class Chef
   class Knife
     class NodeDelete < Knife
 
-      banner "Sub-Command: node delete NODE (options)"
+      banner "knife node delete NODE (options)"
 
       def run 
-        delete_object(Chef::Node, @name_args[0])
+        @node_name = @name_args[0]
+
+        if @node_name.nil?
+          show_usage
+          Chef::Log.fatal("You must specify a node name")
+          exit 1
+        end
+        
+        delete_object(Chef::Node, @node_name)
       end
 
     end

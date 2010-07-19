@@ -16,6 +16,13 @@
 # limitations under the License.
 #
 
+require 'chef/shell_out'
+require 'chef/mixin/shell_out'
+
+include Chef::Mixin::ShellOut
+
+CHEF_CLIENT = File.join(CHEF_PROJECT_ROOT, "chef", "bin", "chef-client")
+
 ###
 # When
 ###
@@ -29,6 +36,11 @@ When /^I run the chef\-client$/ do
     @stderr = e.gets(nil)
   end
   @status = status
+end
+
+When "I run the chef-client for no more than '$timeout' seconds" do |timeout|
+  cmd = shell_out("#{CHEF_CLIENT} -l info -i 1 -s 1 -c #{File.expand_path(File.join(configdir, 'client.rb'))}", :timeout => timeout.to_i)
+  @status = cmd.status
 end
 
 When /^I run the chef\-client again$/ do
@@ -60,6 +72,13 @@ When /^I run the chef\-client at log level '(.+)'$/ do |log_level|
   When "I run the chef-client"
 end
 
+When 'I run the chef-client with json attributes' do
+  @log_level = :debug
+  @chef_args = "-j #{File.join(FEATURES_DATA, 'json_attribs', 'attribute_settings.json')}"
+  When "I run the chef-client"
+end
+  
+
 When /^I run the chef\-client with config file '(.+)'$/ do |config_file|
   @config_file = config_file
   When "I run the chef-client"
@@ -76,7 +95,6 @@ log_location     File.join(tmpdir, "silly-monkey.log")
 file_cache_path  File.join(tmpdir, "cache")
 ssl_verify_mode  :verify_none
 registration_url "http://127.0.0.1:4000"
-openid_url       "http://127.0.0.1:4000"
 template_url     "http://127.0.0.1:4000"
 remotefile_url   "http://127.0.0.1:4000"
 search_url       "http://127.0.0.1:4000"
@@ -138,12 +156,44 @@ def print_output
   puts @stderr
 end
 
+# Matcher for regular expression which uses normal string interpolation for
+# the actual (target) value instead of expecting it, as stdout/stderr which
+# get matched against may have lots of newlines, which looks ugly when
+# inspected, as the newlines show up as \n
+class NoInspectMatch
+  def initialize(expected_regex)
+    @expected_regex = expected_regex
+  end
+  def matches?(target)
+    @target = target
+    @target =~ @expected_regex
+  end
+  def failure_message
+    "expected #{@target} should match #{@expected_regex}"
+  end
+  def negative_failure_message
+    "expected #{@target} not to match #{@expected_regex}"
+  end
+end
+def noinspect_match(expected_regex)
+  NoInspectMatch.new(expected_regex)
+end
+
+
 Then /^'(.+)' should have '(.+)'$/ do |which, to_match|
-  self.instance_variable_get("@#{which}".to_sym).should match(/#{to_match}/m)
+  if which == "stdout" || which == "stderr"
+    self.instance_variable_get("@#{which}".to_sym).should noinspect_match(/#{to_match}/m)
+  else
+    self.instance_variable_get("@#{which}".to_sym).should match(/#{to_match}/m)
+  end    
 end
 
 Then /^'(.+)' should not have '(.+)'$/ do |which, to_match|
-  self.instance_variable_get("@#{which}".to_sym).should_not match(/#{to_match}/m)
+  if which == "stdout" || which == "stderr"
+    self.instance_variable_get("@#{which}".to_sym).should_not noinspect_match(/#{to_match}/m)
+  else
+    self.instance_variable_get("@#{which}".to_sym).should_not match(/#{to_match}/m)
+  end
 end
 
 Then /^'(.+)' should appear on '(.+)' '(.+)' times$/ do |to_match, which, count|

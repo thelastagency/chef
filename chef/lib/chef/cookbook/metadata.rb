@@ -26,6 +26,11 @@ require 'chef/cookbook/metadata/version'
 class Chef
   class Cookbook
     class Metadata
+
+      COMPARISON_FIELDS = [ :name, :description, :long_description, :maintainer,
+                            :maintainer_email, :license, :platforms, :dependencies,
+                            :recommendations, :suggestions, :conflicting, :providing,
+                            :replacing, :attributes, :groupings, :recipes, :version]
     
       include Chef::Mixin::CheckHelper
       include Chef::Mixin::ParamsValidate
@@ -80,6 +85,12 @@ class Chef
             self.provides e
             r
           end
+        end
+      end
+
+      def ==(other)
+        COMPARISON_FIELDS.inject(true) do |equal_so_far, field|
+          equal_so_far && other.respond_to?(field) && (other.send(field) == send(field))
         end
       end
 
@@ -330,7 +341,7 @@ class Chef
             :description => { :kind_of => String },
             :choice => { :kind_of => [ Array ], :default => [] },
             :calculated => { :equal_to => [ true, false ], :default => false },
-            :type => { :equal_to => [ "string", "array", "hash" ], :default => "string" },
+            :type => { :equal_to => [ "string", "array", "hash", "symbol" ], :default => "string" },
             :required => { :equal_to => [ "required", "recommended", "optional", true, false ], :default => "optional" },
             :recipes => { :kind_of => [ Array ], :default => [] },
             :default => { :kind_of => [ String, Array, Hash ] }

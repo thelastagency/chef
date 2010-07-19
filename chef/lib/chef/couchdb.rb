@@ -160,9 +160,11 @@ class Chef
       end
       response = @rest.delete_rest("#{couchdb_database}/#{uuid}?rev=#{rev}")
       response.couchdb = self if response.respond_to?(:couchdb=)
-      Chef::Log.info("Sending #{obj_type}(#{uuid}) to the index queue for deletion..")
       
-      object.delete_from_index(:database => couchdb_database, :id => uuid, :type => obj_type)
+      if object.respond_to?(:delete_from_index)
+        Chef::Log.info("Sending #{obj_type}(#{uuid}) to the index queue for deletion..")
+        object.delete_from_index(:database => couchdb_database, :id => uuid, :type => obj_type)
+      end
 
       response
     end
@@ -230,17 +232,7 @@ class Chef
     end
     
     def view_uri(design, view)
-      Chef::Config[:couchdb_version] ||= @rest.run_request(:GET,
-                                                           URI.parse(@rest.url + "/"),
-                                                           {},
-                                                           10,
-                                                           false)["version"].gsub(/-.+/,"").to_f
-      case Chef::Config[:couchdb_version]
-      when 0.8
-        "#{couchdb_database}/_view/#{design}/#{view}"
-      else
-        "#{couchdb_database}/_design/#{design}/_view/#{view}"
-      end
+      "#{couchdb_database}/_design/#{design}/_view/#{view}"
     end
     
   end

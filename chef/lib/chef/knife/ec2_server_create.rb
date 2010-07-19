@@ -23,7 +23,7 @@ class Chef
   class Knife
     class Ec2ServerCreate < Knife
 
-      banner "Sub-Command: ec2 server create [RUN LIST...] (options)"
+      banner "knife ec2 server create [RUN LIST...] (options)"
 
       option :flavor,
         :short => "-f FLAVOR",
@@ -73,6 +73,15 @@ class Chef
         :description => "Your AWS API Secret Access Key",
         :proc => Proc.new { |key| Chef::Config[:knife][:aws_secret_access_key] = key } 
 
+      option :prerelease,
+        :long => "--prerelease",
+        :description => "Install the pre-release chef gems"
+
+      option :region,
+        :long => "--region REGION",
+        :description => "Your AWS region",
+        :default => "us-east-1"
+
       def h
         @highline ||= HighLine.new
       end
@@ -87,7 +96,8 @@ class Chef
 
         connection = Fog::AWS::EC2.new(
           :aws_access_key_id => Chef::Config[:knife][:aws_access_key_id],
-          :aws_secret_access_key => Chef::Config[:knife][:aws_secret_access_key]
+          :aws_secret_access_key => Chef::Config[:knife][:aws_secret_access_key],
+          :region => config[:region]
         )
 
         server = connection.servers.create(
@@ -117,15 +127,22 @@ class Chef
         puts "#{h.color("Private DNS Name", :cyan)}: #{server.private_dns_name}"
         puts "#{h.color("Private IP Address", :cyan)}: #{server.private_ip_address}"
 
-        puts "\nWaiting 15 seconds for SSH...\n"
-
-        sleep 15
-
-        bootstrap = Chef::Knife::Bootstrap.new
-        bootstrap.name_args = [ server.ip_address, @name_args ].flatten
-        bootstrap.config[:ssh_user] = config[:ssh_user] 
-        bootstrap.config[:chef_node_name] = server.id
-        bootstrap.run
+        begin
+          bootstrap = Chef::Knife::Bootstrap.new
+          bootstrap.name_args = [ server.ip_address, @name_args ].flatten
+          bootstrap.config[:ssh_user] = config[:ssh_user] 
+          bootstrap.config[:chef_node_name] = server.id
+          bootstrap.config[:prerelease] = config[:prerelease]
+          bootstrap.run
+        rescue Errno::ECONNREFUSED
+          puts h.color("Connection refused on SSH, retrying - CTRL-C to abort")
+          sleep 1
+          retry
+        rescue Errno::ETIMEDOUT
+          puts h.color("Connection timed out on SSH, retrying - CTRL-C to abort")
+          sleep 1
+          retry
+        end
 
         puts "\n"
         puts "#{h.color("Instance ID", :cyan)}: #{server.id}"

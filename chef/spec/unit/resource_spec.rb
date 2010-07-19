@@ -26,6 +26,7 @@ end
 
 describe Chef::Resource do
   before(:each) do
+    Chef::Config[:cookbook_path] = File.join(CHEF_SPEC_DATA, 'cookbooks')
     @cookbook_collection = Chef::CookbookCollection.new(Chef::CookbookLoader.new)
     @node = Chef::Node.new
     @run_context = Chef::RunContext.new(@node, @cookbook_collection)
@@ -91,7 +92,6 @@ describe Chef::Resource do
     it "should make notified resources be capable of acting immediately" do
       @run_context.resource_collection << Chef::Resource::ZenMaster.new("coffee")
       @resource.notifies :reload, @run_context.resource_collection.find(:zen_master => "coffee"), :immediate
-      puts "@resource.notifies_immediate = #{@resource.notifies_immediate.inspect}"
       @resource.notifies_immediate.detect{|e| e.resource.name == "coffee" && e.action == :reload}.should_not be_nil
     end
   
@@ -231,6 +231,10 @@ describe Chef::Resource do
       ResourceTestHarness.provider_base.should == Chef::Provider::Package
     end
     
+  end
+
+  it "supports accessing the node via the @node instance variable [DEPRECATED]" do
+    @resource.instance_variable_get(:@node).should == @node
   end
 
   it "runs an action by finding its provider, loading the current resource and then running the action" do

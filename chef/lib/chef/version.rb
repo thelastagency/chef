@@ -16,5 +16,6 @@
 # limitations under the License.
 
 class Chef
-  VERSION = '0.9.0.a4'
+  CHEF_ROOT = File.dirname(File.expand_path(File.dirname(__FILE__)))
+  VERSION = '0.9.7'
 end

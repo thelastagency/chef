@@ -24,16 +24,21 @@ require 'chef/mixin/convert_to_class_name'
 require 'chef/resource_collection'
 require 'chef/node'
 
+require 'chef/mixin/deprecation'
+
 class Chef
   class Resource
-        
+    HIDDEN_IVARS = [:@allowed_actions, :@resource_name, :@source_line, :@run_context, :@name, :@node]
+
     include Chef::Mixin::CheckHelper
     include Chef::Mixin::ParamsValidate
     include Chef::Mixin::Language
     include Chef::Mixin::ConvertToClassName
+    include Chef::Mixin::Deprecation
     
     attr_accessor :params, :provider, :updated, :allowed_actions, :run_context, :cookbook_name, :recipe_name, :enclosing_provider
-    attr_reader :resource_name, :source_line, :not_if_args, :only_if_args
+    attr_accessor :source_line
+    attr_reader :resource_name, :not_if_args, :only_if_args
 
     # Each notify entry is a resource/action pair, modeled as an
     # OpenStruct with a .resource and .action member
@@ -57,12 +62,10 @@ class Chef
       @only_if_args = {}
       @notifies_immediate = Array.new
       @notifies_delayed = Array.new
+      @source_line = nil
       @retries = 0
-      sline = caller(4).shift
-      if sline
-        @source_line = sline.gsub!(/^(.+):(.+):.+$/, '\1 line \2')
-        @source_line = ::File.expand_path(@source_line) if @source_line
-      end
+
+      @node = run_context ? deprecated_ivar(run_context.node, :node, :warn) : nil
     end
     
     def node
@@ -215,6 +218,18 @@ class Chef
     def to_s
       "#{@resource_name}[#{@name}]"
     end
+
+    def to_text
+      ivars = instance_variables.map { |ivar| ivar.to_sym } - HIDDEN_IVARS
+      text = "# Declared in #{@source_line}\n"
+      text << convert_to_snake_case(self.class.name, 'Chef::Resource') + "(\"#{name}\") do\n"
+      ivars.each do |ivar|
+        if (value = instance_variable_get(ivar)) && !(value.respond_to?(:empty?) && value.empty?)
+          text << "  #{ivar.to_s.sub(/^@/,'')}(#{value.inspect})\n"
+        end
+      end
+      text << "end\n"
+    end
     
     # Serialize this object as a hash 
     def to_json(*a)
@@ -234,9 +249,8 @@ class Chef
     def to_hash
       instance_vars = Hash.new
       self.instance_variables.each do |iv|
-        iv = iv.to_s
-        next if iv == "@run_context"
-        instance_vars[iv.sub(/^@/,'').to_sym] = self.instance_variable_get(iv)
+        key = iv.to_s.sub(/^@/,'').to_sym
+        instance_vars[key] = self.instance_variable_get(iv) unless (key == :run_context) || (key == :node)
       end
       instance_vars
     end
@@ -315,6 +329,11 @@ class Chef
       
       def build_from_file(cookbook_name, filename)
         rname = filename_to_qualified_string(cookbook_name, filename)
+
+        # Add log entry if we override an existing light-weight resource.
+        class_name = convert_to_class_name(rname)
+        overriding = Chef::Resource.const_defined?(class_name)
+        Chef::Log.info("#{class_name} light-weight resource already initialized -- overriding!") if overriding
           
         new_resource_class = Class.new self do |cls|
           
@@ -382,7 +401,7 @@ class Chef
         begin
           self.class.provider_base.const_get(convert_to_class_name(name.to_s))
         rescue NameError => e
-          if e.to_s =~ /#{self.class.provider_base.to_s}/
+          if e.to_s =~ /#{Regexp.escape(self.class.provider_base.to_s)}/
             raise ArgumentError, "No provider found to match '#{name}'"
           else
             raise e

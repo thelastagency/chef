@@ -19,6 +19,8 @@
 require 'etc'
 require 'tmpdir'
 require 'chef/log'
+require 'fcntl'
+require 'chef/exceptions'
 
 class Chef
   
@@ -35,12 +37,14 @@ class Chef
   # or jruby.
   class ShellOut
     READ_WAIT_TIME = 0.01
+    READ_SIZE = 4096
     DEFAULT_READ_TIMEOUT = 60
     DEFAULT_ENVIRONMENT = {'LC_ALL' => 'C'}
     
     attr_accessor :user, :group, :cwd, :valid_exit_codes
     attr_reader :command, :umask, :environment
     attr_writer :timeout
+    attr_reader :execution_time
     
     attr_reader :stdout, :stderr, :status
     
@@ -129,20 +133,24 @@ class Chef
     #                                  within +timeout+ seconds (default: 60s)
     def run_command
       Chef::Log.debug("sh(#{@command})")
-      
       @child_pid = fork_subprocess
       
       configure_parent_process_file_descriptors
       propagate_pre_exec_failure
         
       @result = nil
-      read_time = 0
+      @execution_time = 0
      
+      # Ruby 1.8.7 and 1.8.6 from mid 2009 try to allocate objects during GC
+      # when calling IO.select and IO#read. Some OS Vendors are not interested
+      # in updating their ruby packages (Apple, *cough*) and we *have to*
+      # make it work. So I give you this epic hack:
+      GC.disable
       until @status
         ready = IO.select(open_pipes, nil, nil, READ_WAIT_TIME)
         unless ready
-          read_time += READ_WAIT_TIME
-          if read_time >= timeout && !@result
+          @execution_time += READ_WAIT_TIME
+          if @execution_time >= timeout && !@result
             raise Chef::Exceptions::CommandTimeout, "command timed out:\n#{format_for_exception}"
           end
         end
@@ -169,6 +177,10 @@ class Chef
       Process.waitpid2(@child_pid, Process::WNOHANG) rescue nil
       raise
     ensure
+      # no matter what happens, turn the GC back on, and hope whatever busted
+      # version of ruby we're on doesn't allocate some objects during the next
+      # GC run.
+      GC.enable
       close_all_pipes
     end
     
@@ -303,9 +315,7 @@ class Chef
       # Get output as it happens rather than buffered
       child_stdout.sync = true
       child_stderr.sync = true
-      # Set file descriptors to non-blocking IO. man(2) fcntl
-      child_stdout.fcntl(Fcntl::F_SETFL, child_stdout.fcntl(Fcntl::F_GETFL) | Fcntl::O_NONBLOCK)
-      child_stderr.fcntl(Fcntl::F_SETFL, child_stderr.fcntl(Fcntl::F_GETFL) | Fcntl::O_NONBLOCK)
+
       true
     end
     
@@ -316,7 +326,7 @@ class Chef
     end
 
     def read_stdout_to_buffer
-      while chunk = child_stdout.read(16 * 1024)
+      while chunk = child_stdout.read_nonblock(READ_SIZE)
         @stdout << chunk
       end
     rescue Errno::EAGAIN
@@ -325,7 +335,7 @@ class Chef
     end
     
     def read_stderr_to_buffer
-      while chunk = child_stderr.read(16 * 1024)
+      while chunk = child_stderr.read_nonblock(READ_SIZE)
         @stderr << chunk
       end
     rescue Errno::EAGAIN

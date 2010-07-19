@@ -57,6 +57,7 @@ require 'chef/provider/package/rpm'
 require 'chef/provider/package/rubygems'
 require 'chef/provider/package/yum'
 require 'chef/provider/package/zypper'
+require 'chef/provider/package/solaris'
 
 require 'chef/provider/service/arch'
 require 'chef/provider/service/debian'
@@ -82,6 +83,7 @@ require 'chef/provider/group/usermod'
 require 'chef/provider/group/windows'
 
 require 'chef/provider/mount/mount'
+require 'chef/provider/mount/windows'
 
 require 'chef/provider/deploy/revision'
 require 'chef/provider/deploy/timestamped'

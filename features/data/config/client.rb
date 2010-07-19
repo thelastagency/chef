@@ -6,7 +6,6 @@ log_location     STDOUT
 file_cache_path  File.join(tmpdir, "cache")
 ssl_verify_mode  :verify_none
 registration_url "http://127.0.0.1:4000"
-openid_url       "http://127.0.0.1:4000"
 template_url     "http://127.0.0.1:4000"
 remotefile_url   "http://127.0.0.1:4000"
 search_url       "http://127.0.0.1:4000"
@@ -19,3 +18,6 @@ validation_key   File.join(systmpdir, "validation.pem")
 client_key       File.join(systmpdir, "client.pem")
 cache_type "Memory"
 cache_options({})
+
+Ohai::Config[:disabled_plugins] << 'darwin::system_profiler' << 'darwin::kernel' << 'darwin::ssh_host_key' << 'network_listeners'
+Ohai::Config[:disabled_plugins ]<< 'darwin::uptime' << 'darwin::filesystem' << 'dmi' << 'lanuages' << 'perl' << 'python' << 'java'

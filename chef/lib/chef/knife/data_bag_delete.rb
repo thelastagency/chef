@@ -23,17 +23,22 @@ class Chef
   class Knife
     class DataBagDelete < Knife
 
-      banner "Sub-Command: data bag delete BAG [ITEM] (options)"
+      banner "knife data bag delete BAG [ITEM] (options)"
+      category "data bag"
 
       def run 
         if @name_args.length == 2
           delete_object(Chef::DataBagItem, @name_args[1], "data_bag_item") do
             rest.delete_rest("data/#{@name_args[0]}/#{@name_args[1]}")
           end
-        else
+        elsif @name_args.length == 1
           delete_object(Chef::DataBag, @name_args[0], "data_bag") do
             rest.delete_rest("data/#{@name_args[0]}")
           end
+        else
+          show_usage
+          Chef::Log.fatal("You must specify at least a data bag name")
+          exit 1
         end
       end
     end

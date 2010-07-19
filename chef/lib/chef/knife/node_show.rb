@@ -24,7 +24,7 @@ class Chef
   class Knife
     class NodeShow < Knife
 
-      banner "Sub-Command: node show NODE (options)"
+      banner "knife node show NODE (options)"
 
       option :attribute,
         :short => "-a [ATTR]",
@@ -37,7 +37,15 @@ class Chef
         :description => "Show only the run list"
 
       def run 
-        node = Chef::Node.load(@name_args[0])
+        @node_name = @name_args[0]
+
+        if @node_name.nil?
+          show_usage
+          Chef::Log.fatal("You must specify a node name")
+          exit 1
+        end
+        
+        node = Chef::Node.load(@node_name)
         output(format_for_display(node))
       end
     end

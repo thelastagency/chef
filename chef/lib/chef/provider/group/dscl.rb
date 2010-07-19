@@ -50,7 +50,7 @@ class Chef
           gid = nil; next_gid_guess = 200
           groups_gids = safe_dscl("list /Groups gid")
           while(next_gid_guess < search_limit + 200)
-            if groups_gids =~ Regexp.new("#{next_gid_guess}\n")
+            if groups_gids =~ Regexp.new("#{Regexp.escape(next_gid_guess.to_s)}\n")
               next_gid_guess += 1
             else
               gid = next_gid_guess
@@ -63,7 +63,7 @@ class Chef
         def gid_used?(gid)
           return false unless gid
           groups_gids = safe_dscl("list /Groups gid")
-          !! ( groups_gids =~ Regexp.new("#{gid}\n") )
+          !! ( groups_gids =~ Regexp.new("#{Regexp.escape(gid.to_s)}\n") )
         end
 
         def set_gid
@@ -73,7 +73,6 @@ class Chef
         end
 
         def set_members
-          pp :set_members => {:append => @new_resource.append, :members => @new_resource.members}
           unless @new_resource.append
             Chef::Log.debug("#{@new_resource}: removing group members #{@current_resource.members.join(' ')}") unless @current_resource.members.empty?
             safe_dscl("create /Groups/#{@new_resource.group_name} GroupMembers ''") # clear guid list

@@ -23,7 +23,8 @@ class Chef
   class Knife
     class CookbookSiteVendor < Knife
 
-      banner "Sub-Command: cookbook site vendor COOKBOOK [VERSION] (options)"
+      banner "knife cookbook site vendor COOKBOOK [VERSION] (options)"
+      category "cookbook site"
 
       option :deps,
        :short => "-d",
@@ -31,8 +32,20 @@ class Chef
        :boolean => true,
        :description => "Grab dependencies automatically"
 
+      option :cookbook_path,
+        :short => "-o PATH:PATH",
+        :long => "--cookbook-path PATH:PATH",
+        :description => "A colon-separated path to look for cookbooks in",
+        :proc => lambda { |o| o.split(":") }
+
       def run
-        vendor_path = File.join(Chef::Config[:cookbook_path].first)
+        if config[:cookbook_path]
+          Chef::Config[:cookbook_path] = config[:cookbook_path]
+        else
+          config[:cookbook_path] = Chef::Config[:cookbook_path]
+        end
+
+        vendor_path = File.expand_path(File.join(config[:cookbook_path].first))
         cookbook_path = File.join(vendor_path, name_args[0])
         upstream_file = File.join(vendor_path, "#{name_args[0]}.tar.gz")
         branch_name = "chef-vendor-#{name_args[0]}"
@@ -46,7 +59,7 @@ class Chef
         Chef::Mixin::Command.run_command(:command => "git checkout master", :cwd => vendor_path) 
         Chef::Log.info("Checking the status of the vendor branch.")
         status, branch_output, branch_error = Chef::Mixin::Command.output_of_command("git branch --no-color | grep #{branch_name}", :cwd => vendor_path) 
-        if branch_output =~ /#{branch_name}$/m
+        if branch_output =~ /#{Regexp.escape(branch_name)}$/m
           Chef::Log.info("Vendor branch found.")
           Chef::Mixin::Command.run_command(:command => "git checkout #{branch_name}", :cwd => vendor_path)
         else

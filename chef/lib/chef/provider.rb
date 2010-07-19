@@ -67,13 +67,13 @@ class Chef
       # TODO: timh,cw: 2010-5-14: This means that the resources within
       # this block cannot interact with resources outside, e.g.,
       # manipulating notifies.
-      saved_run_context = run_context
-      self.run_context = Chef::RunContext.new(saved_run_context.node, saved_run_context.cookbook_collection)
-      
+      saved_run_context = @run_context
+      @run_context = @run_context.dup
+      @run_context.resource_collection = Chef::ResourceCollection.new
       instance_eval(&block)
-      Chef::Runner.new(run_context).converge
+      Chef::Runner.new(@run_context).converge
       
-      self.run_context = saved_run_context
+      @run_context = saved_run_context
     end
     
     public
@@ -83,6 +83,11 @@ class Chef
       
       def build_from_file(cookbook_name, filename)
         pname = filename_to_qualified_string(cookbook_name, filename)
+        
+        # Add log entry if we override an existing light-weight provider.
+        class_name = convert_to_class_name(pname)
+        overriding = Chef::Provider.const_defined?(class_name)
+        Chef::Log.info("#{class_name} light-weight provider already initialized -- overriding!") if overriding
         
         new_provider_class = Class.new self do |cls|
           

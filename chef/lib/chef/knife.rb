@@ -17,6 +17,7 @@
 # limitations under the License.
 #
 
+require 'chef/version'
 require 'mixlib/cli'
 require 'chef/mixin/convert_to_class_name'
 
@@ -27,75 +28,173 @@ class Chef
     include Mixlib::CLI
     extend Chef::Mixin::ConvertToClassName
 
+    # The "require paths" of the core knife subcommands bundled with chef
+    DEFAULT_SUBCOMMAND_FILES = Dir[File.expand_path(File.join(File.dirname(__FILE__), 'knife', '*.rb'))]
+    DEFAULT_SUBCOMMAND_FILES.map! { |knife_file| knife_file[/#{CHEF_ROOT}#{Regexp.escape(File::SEPARATOR)}(.*)\.rb/,1] }
+
     attr_accessor :name_args
+
+    def self.msg(msg="")
+      puts msg
+    end
+
+    def self.inherited(subclass)
+      unless subclass.unnamed?
+        subcommands[subclass.snake_case_name] = subclass
+      end
+    end
+
+    # Explicitly set the category for the current command to +new_category+
+    # The category is normally determined from the first word of the command
+    # name, but some commands make more sense using two or more words
+    # ===Arguments
+    # new_category::: A String to set the category to (see examples)
+    # ===Examples:
+    # Data bag commands would be in the 'data' category by default. To put them
+    # in the 'data bag' category:
+    #   category('data bag')
+    def self.category(new_category)
+      @category = new_category
+    end
+
+    def self.subcommand_category
+      @category || snake_case_name.split('_').first unless unnamed?
+    end
+
+    def self.snake_case_name
+      convert_to_snake_case(name.split('::').last) unless unnamed?
+    end
+
+    # Does this class have a name? (Classes created via Class.new don't)
+    def self.unnamed?
+      name.nil? || name.empty?
+    end
+
+    def self.subcommands
+      @@subcommands ||= {}
+    end
+
+    def self.subcommands_by_category
+      unless @subcommands_by_category
+        @subcommands_by_category = Hash.new { |hash, key| hash[key] = [] }
+        subcommands.each do |snake_cased, klass|
+          @subcommands_by_category[klass.subcommand_category] << snake_cased
+        end
+      end
+      @subcommands_by_category
+    end
 
     # Load all the sub-commands
     def self.load_commands
-      @sub_classes = Hash.new
-      Dir[
-        File.expand_path(File.join(File.dirname(__FILE__), 'knife', '*.rb'))
-      ].each do |knife_file|
-        require knife_file
-        snake_case_file_name = File.basename(knife_file).sub(/\.rb$/, '')
-        @sub_classes[snake_case_file_name] = convert_to_class_name(snake_case_file_name)
-      end
-      @sub_classes
+      DEFAULT_SUBCOMMAND_FILES.each { |subcommand| require subcommand }
+      subcommands
     end
 
-    def self.list_commands
+    # Print the list of subcommands knife knows about. If +preferred_category+
+    # is given, only subcommands in that category are shown
+    def self.list_commands(preferred_category=nil)
       load_commands
-      @sub_classes.keys.sort.each do |snake_case|
-        klass_instance = build_sub_class(snake_case) 
-        klass_instance.parse_options
-        puts klass_instance.opt_parser
-        puts
-      end
-    end
+      category_desc = preferred_category ? preferred_category + " " : ''
+      msg "Available #{category_desc}subcommands: (for details, knife SUB-COMMAND --help)\n\n"
 
-    def self.build_sub_class(snake_case, merge_opts=nil)
-      klass = Chef::Knife.const_get(@sub_classes[snake_case])
-      klass.options.merge!(merge_opts) if merge_opts 
-      klass.new
-    end
-
-    def self.find_command(args=ARGV, merge_opts={})
-      load_commands
-
-      non_dash_args = Array.new
-      args.each do |arg|
-        non_dash_args << arg if arg =~ /^([[:alnum:]]|_)+$/
+      if preferred_category && subcommands_by_category.key?(preferred_category)
+        commands_to_show = {preferred_category => subcommands_by_category[preferred_category]}
+      else
+        commands_to_show = subcommands_by_category
       end
 
-      to_try = non_dash_args.length 
-      klass_instance = nil
-      cli_bits = nil 
-
-      while(to_try >= 0)
-        cli_bits = non_dash_args[0..to_try]
-        snake_case_class_name = cli_bits.join("_")
-
-        if @sub_classes.has_key?(snake_case_class_name)
-          klass_instance = build_sub_class(snake_case_class_name, merge_opts)
-          break
+      commands_to_show.sort.each do |category, commands|
+        msg "** #{category.upcase} COMMANDS **"
+        commands.each do |command|
+          msg subcommands[command].banner if subcommands[command]
         end
-
-        to_try = to_try - 1
+        msg
       end
+    end
 
-      unless klass_instance
-        Chef::Log.fatal("Cannot find sub command for: #{args.join(' ')}")
-        Chef::Knife.list_commands
-        exit 10
+    # Run knife for the given +args+ (ARGV), adding +options+ to the list of
+    # CLI options that the subcommand knows how to handle.
+    # ===Arguments
+    # args::: usually ARGV
+    # options::: A Mixlib::CLI option parser hash. These +options+ are how
+    # subcommands know about global knife CLI options
+    def self.run(args, options={})
+      load_commands
+      subcommand_class = subcommand_class_from(args)
+      subcommand_class.options.merge!(options)
+      subcommand_class.new(args).run
+    end
+
+    def self.guess_category(args)
+      category_words = args.select {|arg| arg =~ /^([[:alnum:]]|_)+$/ }
+      matching_category = nil
+      while (!matching_category) && (!category_words.empty?)
+        candidate_category = category_words.join(' ')
+        matching_category = candidate_category if subcommands_by_category.key?(candidate_category)
+        matching_category || category_words.pop
       end
+      matching_category
+    end
 
-      extra = klass_instance.parse_options(args)
-      if klass_instance.config[:help]
-        puts klass_instance.opt_parser
+    def self.subcommand_class_from(args)
+      command_words = args.select {|arg| arg =~ /^([[:alnum:]]|_)+$/ }
+      subcommand_class = nil
+
+      while ( !subcommand_class ) && ( !command_words.empty? )
+        snake_case_class_name = command_words.join("_")
+        unless subcommand_class = subcommands[snake_case_class_name]
+          command_words.pop
+        end
+      end
+      subcommand_class || subcommand_not_found!(args)
+    end
+
+    private
+
+    # :nodoc:
+    # Error out and print usage. probably becuase the arguments given by the
+    # user could not be resolved to a subcommand.
+    def self.subcommand_not_found!(args)
+      unless want_help?(args)
+        Chef::Log.fatal("Cannot find sub command for: '#{args.join(' ')}'")
+      end
+      Chef::Knife.list_commands(guess_category(args))
+      exit 10
+    end
+
+    # :nodoc:
+    # TODO: duplicated with chef/application/knife
+    # all logic should be removed from that and Chef::Knife should own it.
+    def self.want_help?(args)
+      (args.any? { |arg| arg =~ /^(:?(:?\-\-)?help|\-h)$/})
+    end
+
+    public
+
+    # Create a new instance of the current class configured for the given
+    # arguments and options
+    def initialize(argv=[])
+      super() # having to call super in initialize is the most annoying anti-pattern :(
+
+      command_name_words = self.class.snake_case_name.split('_')
+
+      # Mixlib::CLI ignores the embedded name_args
+      @name_args = parse_options(argv)
+      @name_args.reject! { |name_arg| command_name_words.delete(name_arg) }
+
+      if config[:help]
+        msg opt_parser
         exit 1
       end
-      klass_instance.name_args = extra.inject([]) { |c, i| cli_bits.include?(i) ? cli_bits.delete(i) : c << i; c } 
-      klass_instance.configure_chef
-      klass_instance
+      configure_chef
+    end
+
+    def parse_options(args)
+      super
+    rescue OptionParser::InvalidOption => e
+      puts "Error: " + e.to_s
+      show_usage
+      exit(1)
     end
 
     def ask_question(question, opts={})
@@ -133,7 +232,7 @@ class Chef
         Chef::Config.from_file(config[:config_file])
       else
         # ...but do log a message if no config was found.
-        Chef::Log.info("No knife configuration file found")
+        self.msg("No knife configuration file found")
       end
 
       Chef::Config[:log_level] = config[:log_level] if config[:log_level]
@@ -159,17 +258,17 @@ class Chef
     def output(data)
       case config[:format]
       when "json", nil
-        puts JSON.pretty_generate(data)
+        stdout.puts JSON.pretty_generate(data)
       when "yaml"
         require 'yaml'
-        puts YAML::dump(data)
+        stdout.puts YAML::dump(data)
       when "text"
         # If you were looking for some attribute and there is only one match
         # just dump the attribute value
         if data.length == 1 and config[:attribute]
-          puts data.values[0]
+          stdout.puts data.values[0]
         else
-          pp data
+          PP.pp(data, stdout)
         end
       else
         raise ArgumentError, "Unknown output format #{config[:format]}"
@@ -187,11 +286,13 @@ class Chef
         config[:attribute].split(".").each do |attr|
           if data.respond_to?(:[])
             data = data[attr]
-          else
+          elsif data.nil?
+            nil # don't get no method error on nil
+          else data.respond_to?(attr.to_sym)
             data = data.send(attr.to_sym)
           end
         end
-        { config[:attribute] => data.kind_of?(Chef::Node::Attribute) ? data.to_hash: data }
+        { config[:attribute] => data.kind_of?(Chef::Node::Attribute) ? data.to_hash : data }
       elsif config[:run_list]
         data = data.run_list.run_list
         { "run_list" => data }
@@ -224,28 +325,41 @@ class Chef
       parse_output ? JSON.parse(output) : output
     end
 
-    def confirm(question)
+    def confirm(question, append_instructions=true)
       return true if config[:yes]
 
-      print "#{question}? (Y/N) "
+      stdout.print question
+      stdout.print "? (Y/N) " if append_instructions
       answer = stdin.readline
       answer.chomp!
       case answer
       when "Y", "y"
         true
       when "N", "n"
-        Chef::Log.info("You said no, so I'm done here.")
+        self.msg("You said no, so I'm done here.")
         exit 3 
       else
-        Chef::Log.error("I have no idea what to do with #{answer}")
-        Chef::Log.error("Just say Y or N, please.")
+        self.msg("I have no idea what to do with #{answer}")
+        self.msg("Just say Y or N, please.")
         confirm(question)
       end
     end
 
-    def load_from_file(klass, from_file) 
-      from_file = @name_args[0]
-      relative_file = File.expand_path(File.join(Dir.pwd, 'roles', from_file))
+    def show_usage
+      stdout.puts("USAGE: " + self.opt_parser.to_s)
+    end
+
+    def load_from_file(klass, from_file, bag=nil) 
+      relative_path = ""
+      if klass == Chef::Role
+        relative_path = "roles"
+      elsif klass == Chef::Node
+        relative_path = "nodes"
+      elsif klass == Chef::DataBagItem
+        relative_path = "data_bags/#{bag}"
+      end
+
+      relative_file = File.expand_path(File.join(Dir.pwd, relative_path, from_file))
       filename = nil
 
       if file_exists_and_is_readable?(from_file)
@@ -281,7 +395,7 @@ class Chef
       
       output.save
 
-      Chef::Log.info("Saved #{output}")
+      self.msg("Saved #{output}")
 
       output(format_for_display(object)) if config[:print_after]
     end
@@ -297,7 +411,7 @@ class Chef
 
       pretty_name ||= output
 
-      Chef::Log.info("Created (or updated) #{pretty_name}")
+      self.msg("Created (or updated) #{pretty_name}")
       
       output(output) if config[:print_after]
     end
@@ -315,7 +429,7 @@ class Chef
       output(format_for_display(object)) if config[:print_after]
 
       obj_name = delete_name ? "#{delete_name}[#{name}]" : object
-      Chef::Log.warn("Deleted #{obj_name}!")
+      self.msg("Deleted #{obj_name}!")
     end
 
     def bulk_delete(klass, fancy_name, delete_name=nil, list=nil, regex=nil, &block)
@@ -342,10 +456,14 @@ class Chef
           object.destroy
         end
         output(format_for_display(object)) if config[:print_after]
-        Chef::Log.warn("Deleted #{fancy_name} #{name}")
+        self.msg("Deleted #{fancy_name} #{name}")
       end
     end
-    
+
+    def msg(message)
+      stdout.puts message
+    end
+
     def stdout
       STDOUT
     end

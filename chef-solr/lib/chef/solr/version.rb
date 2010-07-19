@@ -1,5 +1,5 @@
 class Chef
   class Solr
-    VERSION = '0.9.0.a4'
+    VERSION = '0.9.7'
   end
 end

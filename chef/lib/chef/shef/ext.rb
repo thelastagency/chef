@@ -14,6 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+require 'chef/recipe'
+require 'fileutils'
+require 'chef/version'
+require 'chef/shef/shef_session'
 
 module Shef
   module Extensions
@@ -237,7 +241,7 @@ class Object
               :skip_back    => "move back in the run list",
               :skip_forward => "move forward in the run list"
   def chef_run
-    Shef.session.collection.iterator
+    Shef.session.resource_collection.iterator
   end
   
   desc "resets the current recipe"

@@ -24,7 +24,7 @@ class Chef
   class Knife
     class Bootstrap < Knife
 
-      banner "Sub-Command: knife bootstrap FQDN [RUN LIST...] (options)"
+      banner "knife bootstrap FQDN [RUN LIST...] (options)"
 
       option :ssh_user,
         :short => "-x USERNAME",
@@ -41,6 +41,10 @@ class Chef
         :short => "-N NAME",
         :long => "--node-name NAME",
         :description => "The Chef node name for your new node"
+
+      option :prerelease,
+        :long => "--prerelease",
+        :description => "Install the pre-release chef gems"
 
 
       def h
@@ -67,7 +71,7 @@ if [ ! -f /usr/bin/chef-client ]; then
   cd rubygems-1.3.6
   ruby setup.rb
   cp /usr/bin/gem1.8 /usr/bin/gem
-  gem install chef ohai --no-rdoc --no-ri --verbose
+  gem install ohai chef --no-rdoc --no-ri --verbose #{"--prerelease" if config[:prerelease]}
 fi
 
 mkdir -p /etc/chef

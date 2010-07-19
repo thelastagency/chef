@@ -24,10 +24,18 @@ class Chef
   class Knife
     class ClientDelete < Knife
 
-      banner "Sub-Command: client delete CLIENT (options)"
+      banner "knife client delete CLIENT (options)"
 
       def run 
-        delete_object(Chef::ApiClient, @name_args[0])
+        @client_name = @name_args[0]
+
+        if @client_name.nil?
+          show_usage
+          Chef::Log.fatal("You must specify a client name")
+          exit 1
+        end
+        
+        delete_object(Chef::ApiClient, @client_name)
       end
 
     end

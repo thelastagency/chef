@@ -39,7 +39,7 @@ class Chef
           Chef::Log.debug("Checking for mount point #{@current_resource.mount_point}")
 
           # only check for existence of non-remote devices
-          if(@new_resource.device !~ /:/ && @new_resource.device !~ /\/\// && !::File.exists?(@new_resource.device) )
+          if(@new_resource.device !~ /:/ && @new_resource.device !~ /\/\// && !::File.exists?(device_real) )
             raise Chef::Exceptions::Mount, "Device #{@new_resource.device} does not exist"
           elsif( !::File.exists?(@new_resource.mount_point) )
             raise Chef::Exceptions::Mount, "Mount point #{@new_resource.mount_point} does not exist"
@@ -49,10 +49,10 @@ class Chef
           mounted = false
           shell_out!("mount").stdout.each_line do |line|
             case line
-            when /^#{device_mount_regex}\s+on\s+#{@new_resource.mount_point}/
+            when /^#{device_mount_regex}\s+on\s+#{Regexp.escape(@new_resource.mount_point)}/
               mounted = true
               Chef::Log.debug("Special device #{device_logstring} mounted as #{@new_resource.mount_point}")
-            when /^([\/\w])+\son\s#{@new_resource.mount_point}\s+/
+            when /^([\/\w])+\son\s#{Regexp.escape(@new_resource.mount_point)}\s+/
               mounted = false
               Chef::Log.debug("Special device #{$~[1]} mounted as #{@new_resource.mount_point}")
             end
@@ -65,14 +65,14 @@ class Chef
             case line
             when /^[#\s]/
               next
-            when /^#{device_fstab_regex}\s+#{@new_resource.mount_point}\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/
+            when /^#{device_fstab_regex}\s+#{Regexp.escape(@new_resource.mount_point)}\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)/
               enabled = true
               @current_resource.fstype($1)
               @current_resource.options($2)
               @current_resource.dump($3.to_i)
               @current_resource.pass($4.to_i)
               Chef::Log.debug("Found mount #{device_fstab} to #{@new_resource.mount_point} in /etc/fstab")
-            when /^[\/\w]+\s+#{@new_resource.mount_point}/
+            when /^[\/\w]+\s+#{Regexp.escape(@new_resource.mount_point)}/
               enabled = false
               Chef::Log.debug("Found conflicting mount point #{@new_resource.mount_point} in /etc/fstab")
             end
@@ -84,7 +84,14 @@ class Chef
           unless @current_resource.mounted
             command = "mount -t #{@new_resource.fstype}"
             command << " -o #{@new_resource.options.join(',')}" unless @new_resource.options.nil? || @new_resource.options.empty?
-            command << " #{device_real}"
+            command << case @new_resource.device_type
+            when :device
+              " #{device_real}"
+            when :label
+              " -L #{@new_resource.device}"
+            when :uuid
+              " -U #{@new_resource.device}"
+            end
             command << " #{@new_resource.mount_point}"
             shell_out!(command)
             Chef::Log.info("Mounted #{@new_resource.mount_point}")
@@ -140,7 +147,7 @@ class Chef
             
             found = false
             ::File.readlines("/etc/fstab").reverse_each do |line|
-              if !found && line =~ /^#{device_fstab_regex}\s+#{@new_resource.mount_point}/
+              if !found && line =~ /^#{device_fstab_regex}\s+#{Regexp.escape(@new_resource.mount_point)}/
                 found = true
                 Chef::Log.debug("Removing #{@new_resource.mount_point} from fstab")
                 next
@@ -174,11 +181,10 @@ class Chef
             if @new_resource.device_type == :device
               @real_device = @new_resource.device
             else
+              @real_device = ""
               status = popen4("/sbin/findfs #{device_fstab}") do |pid, stdin, stdout, stderr|
-                @real_device = stdout.first.chomp
-              end
-              unless status.exitstatus == 0
-                @real_device = "/dev/null"
+                device_line = stdout.first # stdout.first consumes
+                @real_device = device_line.chomp unless device_line.nil?
               end
             end
           end
@@ -197,7 +203,7 @@ class Chef
         end
 
         def device_mount_regex
-          ::File.symlink?(device_real) ? "(?:#{device_real})|(?:#{::File.readlink(device_real)})" : device_real
+          ::File.symlink?(device_real) ? "(?:#{Regexp.escape(device_real)})|(?:#{Regexp.escape(::File.readlink(device_real))})" : Regexp.escape(device_real)
         end
 
         def device_fstab_regex

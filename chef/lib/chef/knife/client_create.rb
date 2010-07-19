@@ -35,11 +35,19 @@ class Chef
         :description => "Create the client as an admin",
         :boolean => true
 
-      banner "Sub-Command: client create CLIENT (options)"
+      banner "knife client create CLIENT (options)"
 
-      def run 
+      def run
+        @client_name = @name_args[0]
+
+        if @client_name.nil?
+          show_usage
+          Chef::Log.fatal("You must specify a client name")
+          exit 1
+        end
+        
         client = Chef::ApiClient.new
-        client.name(@name_args[0])
+        client.name(@client_name)
         client.admin(config[:admin])
         
         output = edit_data(client)

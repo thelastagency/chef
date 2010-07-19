@@ -22,7 +22,8 @@ require 'spec/expectations'
 CHEF_PROJECT_ROOT = File.expand_path(File.dirname(__FILE__) + '/../../')
 KNIFE_CONFIG = CHEF_PROJECT_ROOT + '/features/data/config/knife.rb'
 KNIFE_CMD = File.expand_path(File.join(CHEF_PROJECT_ROOT, "chef", "bin", "knife"))
-INTEGRATION_COOKBOOKS = File.join(CHEF_PROJECT_ROOT, "features", "data", "cookbooks")
+FEATURES_DATA = File.join(CHEF_PROJECT_ROOT, "features", "data")
+INTEGRATION_COOKBOOKS = File.join(FEATURES_DATA, "cookbooks")
 
 $:.unshift(CHEF_PROJECT_ROOT + '/chef/lib')
 $:.unshift(CHEF_PROJECT_ROOT + '/chef-server-api/lib')
@@ -46,6 +47,9 @@ require 'webrick'
 require 'restclient'
 
 include Chef::Mixin::ShellOut
+
+Ohai::Config[:disabled_plugins] << 'darwin::system_profiler' << 'darwin::kernel' << 'darwin::ssh_host_key' << 'network_listeners'
+Ohai::Config[:disabled_plugins ]<< 'darwin::uptime' << 'darwin::filesystem' << 'dmi' << 'lanuages' << 'perl' << 'python' << 'java'
 
 ENV['LOG_LEVEL'] ||= 'error'
 
@@ -93,6 +97,7 @@ def create_databases
 
   cmd = [KNIFE_CMD, "cookbook", "upload", "-a", "-o", INTEGRATION_COOKBOOKS, "-u", "validator", "-k", File.join(Dir.tmpdir, "validation.pem"), "-c", KNIFE_CONFIG]
   Chef::Log.info("Uploading fixture cookbooks with #{cmd.join(' ')}")
+  cmd << {:timeout => 120}
   shell_out!(*cmd)
 end
 
@@ -132,8 +137,25 @@ module ChefWorld
                 :chef_args, :config_file, :stdout, :stderr, :status, :exception,
                 :gemserver_thread, :sandbox_url
 
+  def self.ohai
+    # ohai takes a while, so only ever run it once.
+    @ohai ||= begin
+      o = Ohai::System.new
+      o.all_plugins
+      o
+    end
+  end
+
+  def ohai
+    ChefWorld.ohai
+  end
+
   def client
-    @client ||= Chef::Client.new
+    @client ||= begin
+      c = Chef::Client.new
+      c.ohai = ohai
+      c
+    end
   end
 
   def rest

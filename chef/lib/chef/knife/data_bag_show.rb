@@ -23,7 +23,8 @@ class Chef
   class Knife
     class DataBagShow < Knife
 
-      banner "Sub-Command: data bag show BAG [ITEM] (options)"
+      banner "knife data bag show BAG [ITEM] (options)"
+      category "data bag"
 
       def run
         display = case @name_args.length

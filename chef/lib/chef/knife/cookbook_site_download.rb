@@ -23,7 +23,8 @@ class Chef
 
       attr_reader :version
 
-      banner "Sub-Command: cookbook site download COOKBOOK [VERSION] (options)"
+      banner "knife cookbook site download COOKBOOK [VERSION] (options)"
+      category "cookbook site"
 
       option :file,
        :short => "-f FILE",
