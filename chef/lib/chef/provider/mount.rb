@@ -35,7 +35,7 @@ class Chef
             Chef::Log.info("#{@new_resource}: mounted successfully")
           end
         else
-          Chef::Log.debug("#{@new_resource}: not mounting, already mounted")
+          Chef::Log.info("#{@new_resource}: not mounting, already mounted")
         end
       end
 
@@ -48,7 +48,7 @@ class Chef
             Chef::Log.info("#{@new_resource}: unmounted successfully")
           end
         else
-          Chef::Log.debug("#{@new_resource}: not unmounting, already unmounted")
+          Chef::Log.info("#{@new_resource}: not unmounting, already unmounted")
         end
       end
 
@@ -64,7 +64,7 @@ class Chef
               Chef::Log.info("#{@new_resource}: remounted successfully")
             end
           else
-            Chef::Log.debug("#{@new_resource}: not mounted, not remounting")
+            Chef::Log.info("#{@new_resource}: not mounted, not remounting")
           end
         end
       end
@@ -76,7 +76,7 @@ class Chef
             @new_resource.updated = true            
             Chef::Log.info("#{@new_resource}: enabled successfully")
           else
-            Chef::Log.debug("#{@new_resource}: not enabling, already enabled")
+            Chef::Log.info("#{@new_resource}: not enabling, already enabled")
           end
         end
       end
@@ -88,7 +88,7 @@ class Chef
             @new_resource.updated = true            
             Chef::Log.info("#{@new_resource}: disabled successfully")
           else
-            Chef::Log.debug("#{@new_resource}: not disabling, already disabled")
+            Chef::Log.info("#{@new_resource}: not disabling, already disabled")
           end
         end
       end

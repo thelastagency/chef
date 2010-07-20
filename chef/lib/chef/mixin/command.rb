@@ -111,7 +111,7 @@ class Chef
 
         if args.has_key?(:creates)
           if File.exists?(args[:creates])
-            Chef::Log.debug("Skipping #{args[:command]} - creates #{args[:creates]} exists.")
+            Chef::Log.info("Skipping #{args[:command]} - creates #{args[:creates]} exists.")
             return false
           end
         end
@@ -127,7 +127,7 @@ class Chef
       module_function :run_command
       
       def output_of_command(command, args)
-        Chef::Log.debug("Executing #{command}")
+        Chef::Log.info("Executing #{command}")
         stderr_string, stdout_string, status = "", "", nil
         
         exec_processing_block = lambda do |pid, stdin, stdout, stderr|
@@ -153,11 +153,11 @@ class Chef
             status = popen4(command, args, &exec_processing_block)
           end
           
-          Chef::Log.debug("---- Begin output of #{command} ----")
-          Chef::Log.debug("STDOUT: #{stdout_string}")
-          Chef::Log.debug("STDERR: #{stderr_string}")
-          Chef::Log.debug("---- End output of #{command} ----")
-          Chef::Log.debug("Ran #{command} returned #{status.exitstatus}")
+          Chef::Log.info("---- Begin output of #{command} ----")
+          Chef::Log.info("STDOUT: #{stdout_string}")
+          Chef::Log.info("STDERR: #{stderr_string}")
+          Chef::Log.info("---- End output of #{command} ----")
+          Chef::Log.info("Ran #{command} returned #{status.exitstatus}")
         end
         
         return status, stdout_string, stderr_string

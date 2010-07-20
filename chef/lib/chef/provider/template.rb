@@ -37,7 +37,7 @@ class Chef
       def action_create
         raw_template_file = nil
         
-        Chef::Log.debug("looking for template #{@new_resource.source} in cookbook #{cookbook_name.inspect}")
+        Chef::Log.info("Looking for template #{@new_resource.source} in cookbook #{cookbook_name.inspect}")
         
         cache_file_name = "cookbooks/#{cookbook_name}/templates/default/#{@new_resource.source}"
         template_cache_name = "#{cookbook_name}_#{@new_resource.source}"
@@ -74,7 +74,7 @@ class Chef
           FileUtils.cp(template_file.path, @new_resource.path)
           @new_resource.updated = true
         else
-          Chef::Log.debug("#{@new_resource} is unchanged")
+          Chef::Log.info("#{@new_resource} is unchanged")
         end
               
         set_owner if @new_resource.owner != nil

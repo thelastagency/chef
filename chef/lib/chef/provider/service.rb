@@ -39,7 +39,7 @@ class Chef
             Chef::Log.info("#{@new_resource}: enabled successfully")
           end
         else
-          Chef::Log.debug("#{@new_resource}: not enabling, already enabled")
+          Chef::Log.info("#{@new_resource}: not enabling, already enabled")
         end
       end
 
@@ -52,7 +52,7 @@ class Chef
             Chef::Log.info("#{@new_resource}: disabled successfully")
           end
         else
-          Chef::Log.debug("#{@new_resource}: not disabling, already disabled")
+          Chef::Log.info("#{@new_resource}: not disabling, already disabled")
         end
       end
 

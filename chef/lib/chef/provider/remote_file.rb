@@ -30,7 +30,7 @@ class Chef
       include Chef::Mixin::FindPreferredFile
 
       def action_create
-        Chef::Log.debug("Checking #{@new_resource} for changes")
+        Chef::Log.info("Checking #{@new_resource} for changes")
         do_remote_file(@new_resource.source, @current_resource.path)
       end
 
@@ -46,7 +46,7 @@ class Chef
         retval = true
 
         if(@new_resource.checksum && @current_resource.checksum && @current_resource.checksum =~ /^#{@new_resource.checksum}/)
-          Chef::Log.debug("File #{@new_resource} checksum matches, not updating")
+          Chef::Log.info("File #{@new_resource} checksum matches, not updating")
         else
           begin
             # The remote filehandle
@@ -103,7 +103,7 @@ class Chef
           uri = URI.parse(source)
           if uri.absolute
             r = Chef::REST.new(source, nil, nil)
-            Chef::Log.debug("Downloading from absolute URI: #{source}")
+            Chef::Log.info("Downloading from absolute URI: #{source}")
             r.get_rest(source, true).open
           end
         rescue URI::InvalidURIError
@@ -115,7 +115,7 @@ class Chef
         unless Chef::Config[:solo]
           r = Chef::REST.new(Chef::Config[:remotefile_url])
           url = generate_url(source, "files", :checksum => current_checksum)
-          Chef::Log.debug("Downloading from server: #{url}")
+          Chef::Log.info("Downloading from server: #{url}")
           r.get_rest(url, true).open
         end
       end
@@ -131,7 +131,7 @@ class Chef
             @node[:platform],
             @node[:platform_version]
           )
-          Chef::Log.debug("Using local file for remote_file:#{filename}")
+          Chef::Log.info("Using local file for remote_file:#{filename}")
           ::File.open(filename)
         end
       end
