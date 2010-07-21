@@ -58,6 +58,18 @@ class Chef
         exec.user(@new_resource.user)
         exec
       end
+
+      def current_path
+        @new_resource.current_path
+      end
+
+      def shared_path
+        @new_resource.shared_path
+      end
+
+      def deploy_to
+        @new_resource.deploy_to
+      end
       
       def action_deploy
         if all_releases.include?(release_path)
