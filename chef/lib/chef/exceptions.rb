@@ -35,5 +35,8 @@ class Chef
     class CouchDBNotFound < RuntimeError; end
     class PrivateKeyMissing < RuntimeError; end
     class CannotWritePrivateKey < RuntimeError; end
+    class InvalidCommandOption < RuntimeError; end
+    class CommandTimeout < RuntimeError; end
+    class ShellCommandFailed < RuntimeError; end
   end
 end

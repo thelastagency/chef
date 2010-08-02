@@ -287,7 +287,7 @@ class Chef
           Chef::Log.logger
         end
 
-        def initialize(new_resource, run_context=nil)
+        def initialize(node, new_resource, collection=nil, definitions=nil, cookbook_loader=nil)
           super
           if new_resource.gem_binary
             if new_resource.options && new_resource.options.kind_of?(Hash)
@@ -336,7 +336,7 @@ class Chef
 
         def all_installed_versions
           @all_installed_versions ||= begin
-            @gem_env.installed_versions(Gem::Dependency.new(gem_dependency.name))
+            @gem_env.installed_versions(Gem::Dependency.new(gem_dependency.name, '>= 0'))
           end
         end
 
