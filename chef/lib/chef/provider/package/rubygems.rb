@@ -19,6 +19,7 @@
 
 require 'chef/provider/package'
 require 'chef/mixin/command'
+require 'chef/mixin/shell_out'
 require 'chef/resource/package'
 
 # Class methods on Gem are defined in rubygems
