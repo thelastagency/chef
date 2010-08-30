@@ -25,6 +25,9 @@ class Chef
       def initialize(name, collection=nil, node=nil)
         super(name, collection, node)
         @resource_name = :gem_package
+        if node && node[:dependencies][:gem_binary]
+          gem_binary(node[:dependencies][:gem_binary])
+        end
         @provider = Chef::Provider::Package::Rubygems
       end
 

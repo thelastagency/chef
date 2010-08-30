@@ -346,7 +346,7 @@ class Chef
         end
 
         def load_current_resource
-          @current_resource = Chef::Resource::Package::GemPackage.new(@new_resource.name)
+          @current_resource = Chef::Resource::Package::GemPackage.new(@new_resource.name, nil, node)
           @current_resource.package_name(@new_resource.package_name)
           if current_spec = current_version
             @current_resource.version(current_spec.version.to_s)
