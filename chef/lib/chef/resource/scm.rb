@@ -99,6 +99,13 @@ class Chef
         )
       end
       
+      def svn_info_arguments(arg=nil)
+        set_or_return(
+          :svn_info_arguments,
+          arg,
+          :kind_of => String
+        )
+      end
       # Capistrano and git-deploy use ``shallow clone''
       def depth(arg=nil)
         set_or_return(
