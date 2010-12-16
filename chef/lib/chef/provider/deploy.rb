@@ -115,6 +115,7 @@ class Chef
         copy_cached_repo
         install_gems
         enforce_ownership
+        run_symlinks_before_migrate
         callback(:before_migrate, @new_resource.before_migrate)
         migrate
         callback(:before_symlink, @new_resource.before_symlink)
@@ -145,9 +146,7 @@ class Chef
       end
       
       def migrate
-        run_symlinks_before_migrate
-        
-        if @new_resource.migrate
+       if @new_resource.migrate
           enforce_ownership
           
           environment = @new_resource.environment
@@ -272,6 +271,13 @@ class Chef
       def release_deleted(release_path)
       end
       
+
+      # Internal callback, called after copy_cached_repo.
+      # Override if you need to keep state externally.
+      def prepare_rollback
+        []
+      end
+
       def release_slug
         raise Chef::Exceptions::Override, "You must override release_slug in #{self.to_s}"
       end
