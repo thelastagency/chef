@@ -99,9 +99,9 @@ class Chef
         )
       end
       
-      def svn_info_arguments(arg=nil)
+      def svn_info_args(arg=nil)
         set_or_return(
-          :svn_info_arguments,
+          :svn_arguments,
           arg,
           :kind_of => String
         )

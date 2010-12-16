@@ -244,6 +244,13 @@ class Chef
         )
       end
       
+      def svn_info_args(arg=nil)
+        set_or_return(
+          :svn_arguments,
+          arg,
+          :kind_of => [ String ])
+      end
+      
       def scm_provider(arg=nil)
         klass = if arg.kind_of?(String) || arg.kind_of?(Symbol)
                   lookup_provider_constant(arg)
