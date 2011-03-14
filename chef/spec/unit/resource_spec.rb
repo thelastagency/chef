@@ -193,7 +193,7 @@ describe Chef::Resource do
                         :updated, :updated_by_last_action, :before, :not_if, :supports, 
                         :delayed_notifications, :immediate_notifications, :noop,
                         :ignore_failure, :name, :source_line, :action,
-                        :not_if_args, :only_if_args
+                        :not_if_args, :only_if_args, :retries
                       ]
       (hash.keys - expected_keys).should == []
       (expected_keys - hash.keys).should == []
@@ -333,6 +333,44 @@ describe Chef::Resource do
       @resource.run_action(:purr)
     end
 
+  end
+
+  describe "retry" do
+    before(:each) do
+      @provider = stub("provider", :action_install => true, :load_current_resource => true)
+      Chef::Platform.stub(:provider_for_resource).and_return(@provider)
+
+      @resource = Chef::Resource.new("provided", @run_context)
+      @resource.provider = Chef::Provider::SnakeOil
+      @node[:platform] = "fubuntu"
+      @node[:platform_version] = '10.04'
+    end
+
+    it "should default to 0 retries" do
+      @resource.retries.should == 0
+    end
+
+    it "should allow to specify the number of retries for an action" do
+      @resource.retries(1)
+      @resource.retries.should == 1
+    end
+
+    it "should retry on timeout errors" do
+      @resource.retries 1
+      @provider.should_receive(:action_doit).ordered.and_raise(Timeout::Error)
+      @provider.should_receive(:action_doit).ordered.and_raise(Timeout::Error)
+      lambda {
+        @resource.run_action(:doit)
+      }.should raise_error(Timeout::Error)
+    end
+
+    it "should log the error for each run" do
+      @resource.retries 1
+      @provider.should_receive(:action_doit).ordered.and_raise(Chef::Exceptions::Exec.new("gem install returned 1, expected 0"))
+      @provider.should_receive(:action_doit).ordered.and_return(true)
+      Chef::Log.logger.should_receive(:warn).with("Error running action doit, retrying (1 of 1 retries): gem install returned 1, expected 0")
+      @resource.run_action(:doit)
+    end
   end
 
 end

@@ -118,6 +118,7 @@ F
       @immediate_notifications = Array.new
       @delayed_notifications = Array.new
       @source_line = nil
+      @retries = 0
 
       @node = run_context ? deprecated_ivar(run_context.node, :node, :warn) : nil
     end
@@ -295,6 +296,14 @@ F
       true
     end
 
+    def retries(retry_count=nil)
+      set_or_return(
+        :retries,
+        retry_count,
+        :kind_of => Fixnum
+      )
+    end
+
     def is(*args)
       if args.size == 1
         args.first
@@ -392,7 +401,18 @@ F
 
       provider = Chef::Platform.provider_for_resource(self)
       provider.load_current_resource
-      provider.send("action_#{action}")
+      runs = 0
+      begin
+        provider.send("action_#{action}")
+      rescue Chef::Exceptions::Exec, Timeout::Error
+        if @retries > runs
+          runs += 1
+          Chef::Log.warn("Error running action #{action}, retrying (#{runs} of #{@retries} retries): #{$!.message}")
+          retry
+        else
+          raise
+        end
+      end
     end
 
     def updated_by_last_action(true_or_false)
