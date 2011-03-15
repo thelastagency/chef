@@ -73,8 +73,15 @@ class Chef
           # === Returns
           # [Gem::Specification]  an array of Gem::Specification objects
           def installed_versions(gem_dep)
+            # workaround for Bundler ...
+            # if we are running under bundler we still want to use the orignal Gem SourceIndex in order to find gems
+            if defined?(Bundler) && ::File.exists?("/usr/local/lib/site_ruby/1.8/rubygems/source_index.rb") && !@@_gem_source_index_reloaded
+              load '/usr/local/lib/site_ruby/1.8/rubygems/source_index.rb'
+              @@_gem_source_index_reloaded = true
+            end
             gem_source_index.search(gem_dep)
           end
+          @@_gem_source_index_reloaded = false
 
           ##
           # Yields to the provided block with rubygems' source list set to the

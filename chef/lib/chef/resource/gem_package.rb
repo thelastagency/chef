@@ -26,6 +26,9 @@ class Chef
         super
         @resource_name = :gem_package
         @provider = Chef::Provider::Package::Rubygems
+        if node && node[:dependencies][:gem_binary]
+          gem_binary(node[:dependencies][:gem_binary])
+        end
       end
 
       # Sets a custom gem_binary to run for gem commands.
